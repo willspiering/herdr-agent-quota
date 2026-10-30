@@ -1,0 +1,183 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-30T22:27:58.568492+00:00",
+  "title": "Design System: Herdr Agent Quota",
+  "extensions": {
+    "colorMeta": {
+      "healthy-dark": {
+        "role": "secondary",
+        "displayName": "Healthy Dark",
+        "tonalRamp": [
+          "oklch(15% 0.0833 168.75)",
+          "oklch(26% 0.0833 168.75)",
+          "oklch(38% 0.0833 168.75)",
+          "oklch(49% 0.0833 168.75)",
+          "oklch(61% 0.0833 168.75)",
+          "oklch(72% 0.0833 168.75)",
+          "oklch(84% 0.0833 168.75)",
+          "oklch(95% 0.0833 168.75)"
+        ]
+      },
+      "healthy-light": {
+        "role": "secondary",
+        "displayName": "Healthy Light",
+        "tonalRamp": [
+          "oklch(15% 0.0845 164.80)",
+          "oklch(26% 0.0845 164.80)",
+          "oklch(38% 0.0845 164.80)",
+          "oklch(49% 0.0845 164.80)",
+          "oklch(61% 0.0845 164.80)",
+          "oklch(72% 0.0845 164.80)",
+          "oklch(84% 0.0845 164.80)",
+          "oklch(95% 0.0845 164.80)"
+        ]
+      },
+      "warning-dark": {
+        "role": "secondary",
+        "displayName": "Warning Dark",
+        "tonalRamp": [
+          "oklch(15% 0.0991 82.81)",
+          "oklch(26% 0.0991 82.81)",
+          "oklch(38% 0.0991 82.81)",
+          "oklch(49% 0.0991 82.81)",
+          "oklch(61% 0.0991 82.81)",
+          "oklch(72% 0.0991 82.81)",
+          "oklch(84% 0.0991 82.81)",
+          "oklch(95% 0.0991 82.81)"
+        ]
+      },
+      "warning-light": {
+        "role": "secondary",
+        "displayName": "Warning Light",
+        "tonalRamp": [
+          "oklch(15% 0.0941 76.40)",
+          "oklch(26% 0.0941 76.40)",
+          "oklch(38% 0.0941 76.40)",
+          "oklch(49% 0.0941 76.40)",
+          "oklch(61% 0.0941 76.40)",
+          "oklch(72% 0.0941 76.40)",
+          "oklch(84% 0.0941 76.40)",
+          "oklch(95% 0.0941 76.40)"
+        ]
+      },
+      "redline-dark": {
+        "role": "secondary",
+        "displayName": "Redline Dark",
+        "tonalRamp": [
+          "oklch(15% 0.1257 26.97)",
+          "oklch(26% 0.1257 26.97)",
+          "oklch(38% 0.1257 26.97)",
+          "oklch(49% 0.1257 26.97)",
+          "oklch(61% 0.1257 26.97)",
+          "oklch(72% 0.1257 26.97)",
+          "oklch(84% 0.1257 26.97)",
+          "oklch(95% 0.1257 26.97)"
+        ]
+      },
+      "redline-light": {
+        "role": "secondary",
+        "displayName": "Redline Light",
+        "tonalRamp": [
+          "oklch(15% 0.1621 26.35)",
+          "oklch(26% 0.1621 26.35)",
+          "oklch(38% 0.1621 26.35)",
+          "oklch(49% 0.1621 26.35)",
+          "oklch(61% 0.1621 26.35)",
+          "oklch(72% 0.1621 26.35)",
+          "oklch(84% 0.1621 26.35)",
+          "oklch(95% 0.1621 26.35)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Gauge value",
+        "purpose": "Measured quota percentage; family and line height inherited from Herdr."
+      },
+      "headline": {
+        "displayName": "Dashboard title",
+        "purpose": "Native dashboard title; family and line height inherited from Herdr."
+      }
+    },
+    "shadows": [],
+    "motion": [],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Native button translation",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "Browser translation only; sample dark palette from scripts/preview.mjs. Not native rendering evidence or a fixed Herdr theme.",
+      "html": "<button class=\"ds-button\">Refresh</button>",
+      "css": ".ds-button{height:30px;padding:0 10px;border:1px solid #363940;border-radius:5px;background:#202228;color:#e5e7ec;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}.ds-button:hover{background:#34373f}.ds-button:focus-visible{border-color:#8bb3e6;background:#303946;outline:none}"
+    },
+    {
+      "name": "Selected toggle translation",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "Browser translation only; sample dark palette from scripts/preview.mjs. Not native rendering evidence or a fixed Herdr theme. Selected styling accompanies the explicit On label.",
+      "html": "<button class=\"ds-button ds-selected\" aria-pressed=\"true\">On \u00b7 Running agents first</button>",
+      "css": ".ds-button{height:30px;padding:0 10px;border:1px solid #363940;border-radius:5px;background:#202228;color:#e5e7ec;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}.ds-button:hover{background:#34373f}.ds-button:focus-visible{border-color:#8bb3e6;background:#303946;outline:none}.ds-selected{background:#303946;border-color:#687184}.ds-selected:focus-visible{border-color:#8bb3e6}"
+    },
+    {
+      "name": "Status strip translation",
+      "kind": "custom",
+      "description": "Browser translation only; sample dark palette from scripts/preview.mjs. Not native rendering evidence or a fixed Herdr theme. Synthetic 78% reading; default 70% redline. The 28px sample height comes from the preview host; native strip height is inherited.",
+      "html": "<button class=\"ds-strip\" aria-label=\"Open agent quota dashboard\"><span class=\"ds-muted\">Codex</span><span class=\"ds-window\">5h</span><span class=\"ds-bar\"><i class=\"ds-used\"></i><i class=\"ds-threshold\"></i></span><span class=\"ds-redline\">78%</span></button>",
+      "css": ".ds-strip{display:flex;align-items:center;justify-content:flex-end;gap:12px;padding:0 12px;height:28px;min-width:280px;background:#191b20;border:1px solid #363940;color:#e5e7ec;font-size:11px;cursor:pointer}.ds-strip:focus-visible{outline:none;border-color:#8bb3e6;background:#303946}.ds-muted,.ds-window{color:#abb0bc}.ds-window{font-size:10px}.ds-bar{position:relative;width:28px;height:5px;border-radius:2px;background:#363940}.ds-used{position:absolute;left:0;top:0;height:5px;width:78%;background:#f48e83;border-radius:2px}.ds-threshold{position:absolute;left:70%;top:-2px;height:9px;width:1px;background:#f48e83;opacity:.6}.ds-redline{color:#f48e83}"
+    },
+    {
+      "name": "Quota gauge translation",
+      "kind": "custom",
+      "refersTo": "gauge",
+      "description": "Browser translation only; sample dark palette from scripts/preview.mjs. Not native rendering evidence or a fixed Herdr theme. Synthetic fresh 78% usage, default 70% threshold.",
+      "html": "<div class=\"ds-gauge\"><div class=\"ds-face\"><svg width=\"170\" height=\"130\" aria-hidden=\"true\"><rect x=\"26.574\" y=\"110.000\" width=\"5\" height=\"5\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"23.533\" y=\"104.031\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"21.132\" y=\"97.777\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"19.399\" y=\"91.306\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"18.351\" y=\"84.690\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"18.000\" y=\"78.000\" width=\"5\" height=\"5\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"18.351\" y=\"71.310\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"19.399\" y=\"64.694\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"21.132\" y=\"58.223\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"23.533\" y=\"51.969\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"26.574\" y=\"46.000\" width=\"5\" height=\"5\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"30.223\" y=\"40.382\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"34.439\" y=\"35.176\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"39.176\" y=\"30.439\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"44.382\" y=\"26.223\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"50.000\" y=\"22.574\" width=\"5\" height=\"5\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"55.969\" y=\"19.533\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"62.223\" y=\"17.132\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"68.694\" y=\"15.399\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"75.310\" y=\"14.351\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"82.000\" y=\"14.000\" width=\"5\" height=\"5\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"88.690\" y=\"14.351\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"95.306\" y=\"15.399\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"101.777\" y=\"17.132\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"108.031\" y=\"19.533\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"114.000\" y=\"22.574\" width=\"5\" height=\"5\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"119.618\" y=\"26.223\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"124.824\" y=\"30.439\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"129.561\" y=\"35.176\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"133.777\" y=\"40.382\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"137.426\" y=\"46.000\" width=\"5\" height=\"5\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"140.467\" y=\"51.969\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"1\"/><rect x=\"142.868\" y=\"58.223\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"0.5\"/><rect x=\"144.601\" y=\"64.694\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"0.5\"/><rect x=\"145.649\" y=\"71.310\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"0.5\"/><rect x=\"146.000\" y=\"78.000\" width=\"5\" height=\"5\" rx=\"2\" fill=\"#f48e83\" opacity=\"0.5\"/><rect x=\"145.649\" y=\"84.690\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"0.5\"/><rect x=\"144.601\" y=\"91.306\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"0.5\"/><rect x=\"142.868\" y=\"97.777\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"0.5\"/><rect x=\"140.467\" y=\"104.031\" width=\"3\" height=\"3\" rx=\"2\" fill=\"#f48e83\" opacity=\"0.5\"/><rect x=\"137.426\" y=\"110.000\" width=\"5\" height=\"5\" rx=\"2\" fill=\"#f48e83\" opacity=\"0.5\"/></svg><div class=\"ds-value\">78%</div><div class=\"ds-state\">used</div><span class=\"ds-zero\">0</span><span class=\"ds-hundred\">100</span></div><div class=\"ds-limit\">5h</div><div class=\"ds-detail\">Resets in 2h 0m</div><div class=\"ds-pace\">Ahead of pace</div></div>",
+      "css": ".ds-gauge{width:176px;display:flex;flex-direction:column;align-items:center;gap:3px;color:#e5e7ec}.ds-face{position:relative;width:170px;height:130px}.ds-value{position:absolute;left:0;top:57px;width:170px;text-align:center;font-size:30px;font-weight:600;color:#f48e83}.ds-state{position:absolute;left:0;top:94px;width:170px;text-align:center;font-size:10px;color:#abb0bc}.ds-zero,.ds-hundred{position:absolute;top:117px;font-size:10px;color:#abb0bc}.ds-zero{left:24px}.ds-hundred{right:15px}.ds-limit{font-size:13px;font-weight:500;max-width:172px}.ds-detail,.ds-pace{font-size:11px;max-width:172px}.ds-detail{color:#abb0bc}.ds-pace{color:#f48e83}"
+    },
+    {
+      "name": "Provider section translation",
+      "kind": "custom",
+      "refersTo": "provider-section",
+      "description": "Browser translation only; sample dark palette from scripts/preview.mjs. Not native rendering evidence or a fixed Herdr theme. Provider initial demonstrates the native fallback, not its shipped agent icon.",
+      "html": "<section class=\"ds-provider\"><div class=\"ds-provider-heading\"><span class=\"ds-initial\">C</span><strong>Codex</strong><span class=\"ds-plan\">Pro</span><span class=\"ds-working\">1 working</span></div><div class=\"ds-account\">Account quota</div><div class=\"ds-session\"><span class=\"ds-dot\"></span><span class=\"ds-session-name\">Working \u00b7 Personal / Build quota</span><button class=\"ds-button\">Go to agent</button></div></section>",
+      "css": ".ds-button{height:30px;padding:0 10px;border:1px solid #363940;border-radius:5px;background:#202228;color:#e5e7ec;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}.ds-button:hover{background:#34373f}.ds-button:focus-visible{border-color:#8bb3e6;background:#303946;outline:none}.ds-provider{display:flex;flex-direction:column;gap:14px;padding:20px 0;color:#e5e7ec;min-width:350px}.ds-provider-heading{display:flex;align-items:center;gap:10px}.ds-initial{width:20px;font-size:20px;color:#abb0bc}.ds-provider-heading strong{font-size:17px;font-weight:600}.ds-plan,.ds-account{font-size:11px;color:#abb0bc}.ds-working{margin-left:auto;font-size:11px;color:#e1bc75}.ds-session{display:flex;align-items:center;gap:8px}.ds-dot{width:5px;height:5px;border-radius:3px;background:#e1bc75;flex:none}.ds-session-name{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:11px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Herdr's quota instrument panel",
+    "overview": "The installed Herdr theme is the visual authority. This native GPUI mod follows the compact status-bar-to-dashboard workflow of Lakris2407/herdr-quota, with graphical instruments for quota pressure. It adds health colors and gauge geometry without introducing a separate web identity.\n\nThe strip is dense and quiet; the dashboard provides provider limits and session activity in a scrollable native window. Account quota and session activity remain visually distinct. This record comes from `mods/agent-quota/main.js` and `core.js`, with product constraints from `PRODUCT.md`. It is a source-derived system, not evidence of native visual verification. A native trial remains pending.",
+    "keyCharacteristics": [
+      "Native theme inheritance for surfaces, text, focus and agent activity.",
+      "A compact strip opens a detailed quota dashboard.",
+      "A clockwise 240\u00b0 gauge makes remaining headroom visible.",
+      "Unknown, stale and remote information retain explicit labels."
+    ],
+    "rules": [
+      {
+        "name": "The Theme Inheritance Rule",
+        "body": "Resolve native surface, text, interaction and activity roles from Herdr on render. The fixed colors in `scripts/preview.mjs` are sample preview values, not the installed theme or native design tokens.",
+        "section": "colors"
+      },
+      {
+        "name": "The Honest Reading Rule",
+        "body": "Only fresh account quota contributes to redline alerts. Unknown usage is never rendered as a measured zero; stale usage never carries fresh health color.",
+        "section": "components"
+      }
+    ],
+    "dos": [
+      "**Do** inherit Herdr's theme and font at render time.",
+      "**Do** keep the strip compact and reveal detailed gauges in the dashboard.",
+      "**Do** preserve the 240\u00b0 gauge geometry and configurable redline, defaulting to 70% used.",
+      "**Do** accompany color with percentages, status words and explicit unknown/stale labels.",
+      "**Do** keep provider account quota separate from session and remote activity.",
+      "**Do** preserve focus borders and keyboard activation on native controls."
+    ],
+    "donts": [
+      "**Don't** promote the browser preview palette, system font, frame or substitute glyphs into native tokens.",
+      "**Don't** invent percentages, reset times, quota windows or token counts.",
+      "**Don't** sum account quota across spaces or infer a session's account from its provider.",
+      "**Don't** describe source extraction or synthetic browser approximations as native visual verification."
+    ]
+  }
+}
