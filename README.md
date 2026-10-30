@@ -37,7 +37,13 @@ npm run setup
 For the optional quota readout in each agent's pane header:
 
 ```sh
-npm run setup -- --headers
+npm run setup:headers
+```
+
+Or run the installer directly, without npm argument forwarding:
+
+```sh
+node ~/DEV/Personal/herdr-agent-quota/scripts/install.mjs --headers
 ```
 
 Setup installs **quota-axi 0.1.69** locally from npm with package lifecycle
