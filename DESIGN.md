@@ -140,7 +140,7 @@ The signature gauge is a dotted 240° clockwise arc, from 150° to 390°, with 4
 
 ### Buttons and toggles
 
-Compact native buttons share the frontmatter geometry, a 1-unit border, a 6-unit internal gap and foreground text. Ordinary buttons use popover/border; selected buttons use selected/input. Hover changes the fill to hover. Focus changes border/fill to accent/selected. Each button owns a focus handle and supports Tab, Enter and Space. Toggles express their state in text as `On · …` or `Off · …`, in addition to selected styling. The same primitive supplies dashboard tabs, refresh, configuration choices, session navigation and pane controls.
+Compact native buttons share the frontmatter geometry, a 1-unit border, a 6-unit internal gap and foreground text. Ordinary buttons use popover/border; selected buttons use selected/input. Hover changes the fill to hover. Focus changes border/fill to accent/selected. Herdr's native `Button` retains focus and keyboard activation by stable component ID; view-owned focus handles are created only in `init()`. Buttons support Tab, Enter and Space. Toggles express their state in text as `On · …` or `Off · …`, in addition to selected styling. The same primitive supplies dashboard tabs, refresh, configuration choices, session navigation and pane controls.
 
 ### Status strip and quota bars
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased fixes
+
+- Create the status-strip focus handle during initialization. Dashboard and
+  pane controls use native buttons with retained focus, so rendering never
+  creates view-owned focus handles. Regression tests enforce Herdr's phase rule.
+
 ## 0.1.0 — local trial, native validation pending
 
 - Compact quota strip with graphical dashboard and a configurable 70% redline.

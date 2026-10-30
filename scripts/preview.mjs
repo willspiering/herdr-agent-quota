@@ -16,6 +16,7 @@ ${collector}
 class View {}
 class E {constructor(type='div',value){this.type=type;this.value=value;this.styles={};this.nodes=[];this.events={};return new Proxy(this,{get:(t,p,r)=>p in t?t[p]:(...a)=>{t.styles[p]=a;return r;}})}child(v){if(v!=null)this.nodes.push(v);return this}children(v){v.forEach(x=>this.child(x));return this}when(c,f){return c?f(this):this}on_click(fn){this.events.click=fn;return this}on_key_down(fn){this.events.keydown=fn;return this}on_mouse_down(){return this}on_size_change(){return this}hover(){return this}}
 const div=()=>new E(),h_flex=()=>new E('row'),v_flex=()=>new E('column'),svg=v=>new E('icon',v),image=v=>new E('icon',v);
+const Button={new:id=>new E('row').id(id)};
 const dark={foreground:'#e5e7ec',muted:'#abb0bc',dim:'#888e9b',border:'#363940',input:'#687184',accent:'#8bb3e6',popover:'#202228',surface:'#25282f',chrome:'#191b20',background:'#202228',hover:'#34373f',selected:'#303946',working:'#e1bc75',blocked:'#f48e83',done:'#80c9ae',idle:'#abb0bc'};
 const light={...dark,foreground:'#20242c',muted:'#505a69',dim:'#596372',border:'#cdd2db',input:'#8b95a4',accent:'#3768a0',popover:'#f9fafc',surface:'#edf0f4',chrome:'#eff1f5',background:'#f9fafc',selected:'#dce5f2',hover:'#e5eaf1',working:'#79530c',blocked:'#ad302d',done:'#226b50',idle:'#505a69'};
 let scenario='normal',storage={},properties={},currentTheme=dark;

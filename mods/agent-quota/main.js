@@ -1,5 +1,5 @@
 import { View, div, svg, image } from "gpui-kit";
-import { h_flex, v_flex } from "gpui-base";
+import { Button, h_flex, v_flex } from "gpui-base";
 import {
   exec, appHome, readTextFile, knownAgents, agents, spaces, panes,
   theme, settings, shared, setShared, props, openOverlay, closeOverlay, nextCommand, run,
@@ -31,7 +31,7 @@ export default class AgentQuota extends View {
     this.mode = props()?.mode ?? "strip";
     this.page = "overview";
     this.width = 850;
-    this.handles = {};
+    this.stripFocus = cx.focus_handle();
     this.runtime = {};
     this.pending = false;
     this.discoveryAt = 0;
@@ -95,18 +95,17 @@ export default class AgentQuota extends View {
   }
 
   button(id, title, action, t, cx, active = false) {
-    this.handles[id] ??= cx.focus_handle();
-    const handle = this.handles[id];
-    const invoke = (event, eventCx) => { eventCx.stop_propagation(); handle.focus(); action(event, eventCx); };
-    return h_flex().id(id).h(30).px(10).gap(6).items_center().flex_none().rounded(5)
+    const invoke = (event, eventCx) => { eventCx.stop_propagation(); action(event, eventCx); };
+    // Native buttons retain focus and keyboard activation by stable component ID.
+    return Button.new(id).flex().h(30).px(10).gap(6).items_center().flex_none().rounded(5)
       .role("button").accessibility_label(title)
-      .track_focus(handle).tab_stop(true).tab_index(0)
-      .border(1).border_color(handle.is_focused() ? t.accent : active ? t.input : t.border)
+      .tab_stop(true).tab_index(0)
+      .border(1).border_color(active ? t.input : t.border)
       .bg(active ? t.selected : t.popover).text_size(12).text_color(t.foreground)
       .focus(s => s.border_color(t.accent).bg(t.selected))
       .cursor_pointer().hover(s => s.bg(t.hover))
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-      .on_click(invoke).on_key_down((e, cx) => { if (e.key === "enter" || e.key === "space") invoke(e, cx); })
+      .on_click(invoke)
       .child(title);
   }
 
@@ -183,13 +182,11 @@ export default class AgentQuota extends View {
             .child(label(["fresh", "stale"].includes(state) ? `${state === "stale" ? "~" : ""}${Math.round(w.percentUsed)}%` : "—", 11, state === "fresh" ? colorFor(w.percentUsed, o, t) : t.muted));
         }));
     });
-    this.handles.strip ??= cx.focus_handle();
     return h_flex().id("agent-quota-strip").size_full().px(12).gap(12).items_center().justify_end().overflow_hidden()
       .on_size_change((s, cx) => { this.width = s.width; cx.notify(); })
-      .bg(this.handles.strip.is_focused() ? t.selected : t.chrome).border(1)
-      .border_color(this.handles.strip.is_focused() ? t.accent : t.border).cursor_pointer()
+      .bg(t.chrome).border(1).border_color(t.border).cursor_pointer()
       .focus(s => s.border_color(t.accent).bg(t.selected))
-      .track_focus(this.handles.strip).tab_stop(true).tab_index(0)
+      .track_focus(this.stripFocus).tab_stop(true).tab_index(0)
       .role("button").accessibility_label("Open agent quota dashboard")
       .tooltip("Agent quota · click for dashboard")
       .on_click(() => this.open()).on_mouse_down("right", () => this.open())

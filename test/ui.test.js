@@ -62,3 +62,19 @@ test("keyboard activation opens the dashboard", async () => {
   host.tree().events.keydown({ key: "enter" });
   assert.equal(host.overlays.length, 1);
 });
+test("rendering and repainting all surfaces never allocate focus handles", async () => {
+  for (const mode of ["strip", "dashboard", "header"]) {
+    const host = await createHost({ mode, data, runtime: { pane: "p1" }, paneList: [{ pane: "p1", terminal: "t1", program: { key: "codex", name: "Codex", agent: true } }] });
+    const allocations = host.focus.allocations;
+    assert.equal(allocations, 1);
+    host.tree(); host.tree();
+    if (mode === "dashboard") {
+      find(host.tree(), "configure").events.click({}, host.cx);
+      host.tree(); host.tree();
+      // A newly discovered provider creates more buttons without allocating view handles.
+      host.state[`${PREFIX}.discovered`] = [{ key: "claude", name: "Claude", installed: true }];
+      host.tree();
+    }
+    assert.equal(host.focus.allocations, allocations, mode);
+  }
+});

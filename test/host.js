@@ -22,6 +22,7 @@ export class Element {
 export const constructors = {
   View: class {}, div: () => new Element(), h_flex: () => new Element("row"), v_flex: () => new Element("column"),
   svg: value => new Element("svg", value), image: value => new Element("image", value),
+  Button: { new: id => new Element("button").id(id) },
 };
 export const palette = {
   foreground: "#e5e7ec", muted: "#abb0bc", dim: "#888e9b", border: "#363940", input: "#687184", accent: "#8bb3e6",
@@ -42,8 +43,14 @@ export async function createHost({ mode = "dashboard", data = null, live = [], i
   const state = { [`${core.PREFIX}.data`]: data, [`${core.PREFIX}.discovered`]: installed };
   const properties = { mode, ...runtime };
   const tasks = [], timers = [], overlays = [], commands = [];
+  let phase = "init";
+  const focus = { allocations: 0 };
   const cx = {
-    focus_handle: () => ({ focus() {}, is_focused: () => false }), notify() {}, stop_propagation() {},
+    focus_handle() {
+      if (phase === "render") throw new Error("cx.focus_handle() cannot run during render");
+      focus.allocations++;
+      return { focus() {}, is_focused: () => false };
+    }, notify() {}, stop_propagation() {},
     spawn(fn) { tasks.push(fn); }, timer: { every(ms, fn) { timers.push({ ms, fn }); } },
   };
   const api = {
@@ -57,5 +64,8 @@ export async function createHost({ mode = "dashboard", data = null, live = [], i
   const code = source.replace(/import[\s\S]*?from\s+"[^";]+";/g, "").replace("export function colors", "function colors").replace("export default class AgentQuota", "class AgentQuota");
   const AgentQuota = new Function(...Object.keys(deps), `${code}\nreturn AgentQuota;`)(...Object.values(deps));
   const view = new AgentQuota(); view.init(properties, cx);
-  return { view, cx, state, tasks, timers, overlays, commands, properties, tree: () => view.render(cx) };
+  return { view, cx, state, tasks, timers, overlays, commands, properties, focus, tree() {
+    phase = "render";
+    try { return view.render(cx); } finally { phase = "event"; }
+  } };
 }
