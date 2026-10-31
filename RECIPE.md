@@ -1,27 +1,36 @@
 # Herdr Agent Quota
 
-A quiet quota readout at the right end of Herdr's status bar opens a graphical
-view of account limits and agent activity. Each limit has a speedometer-like
-gauge and a visible red zone from 70% used. Codex, Claude and Grok lead when
+A quiet, terminal-styled quota readout at the right end of Herdr's status bar
+opens a view of account limits and agent activity. Each limit is a segmented
+meter (or optional 240° gauge) with a dim red zone from 70% used and a white
+tick for how much of its window has passed, named by a legend in the header. Codex, Claude and Grok lead when
 no active agent takes priority. A publication screenshot is pending broader
 native validation; no synthetic image is represented as a live capture.
 
 ## What you see
 
 Keep Herdr's original status readout at left and put the quota strip beside
-it in the same 28px row. Use the current Herdr chrome, popover, foreground,
-muted and border tokens. The strip has 12px horizontal padding, 12px provider
-gaps, 12px icons and 28×5px quota tracks. Show fewer providers when space is
-tight, with an overflow count opening the full view.
+it in the same 28px row. All surfaces use the terminal font
+(`settings().font_family`, else JetBrains Mono) and Herdr's chrome, popover,
+foreground, muted and border tokens. The strip has 12px padding, 14px gaps and
+12px icons; each limit is a 10px label, then a 34×8 meter of 3px cells, an
+8-cell `▕███░░░░░▏` block bar, or nothing, then its percentage. Show fewer
+providers when space is tight, with a `+N` overflow count.
 
-The full view is a named 850×660 native floating window. Its header has a
-23px title, global activity counts, update age, Refresh and Close. Overview
-and Configure sit beneath it. A scrolling body contains one horizontal
-section per provider account, a 17px provider name, plan and activity count,
-wrapping 176px-wide gauges, then sessions and navigation controls. Each
-gauge uses 41 native marks on a 240° arc, a 30px percentage, its actual limit
-label, reset countdown and pace. The footer explains account sharing,
-remote activity and unavailable absolute token counts.
+The full view is a column docked beside the terminals (hidden layout block
+`agent-quota-panel`, 460px, 380–900, framed like the panes: radius 10, 1px
+border, 16px inset). Layouts without that column get a named 850×660 native
+window instead (24px inset). Both have a 17px title with agent,
+space and update counts, `↻ Refresh` (a braille spinner while collecting) and
+`✕`; an Overview/Settings segmented control and `redline N%`. Each provider
+section is a 16px glyph, 14px name, `[plan]`, a 1px rule and its activity
+(`● 2 working`, `▲ 1 needs you`). Meter rows: 72px label, a painted meter of
+5×10 cells with 2px gaps, 76px value with `used`/`left`, 130px reset, 100px
+pace. Gauges: 30 segments on a 240° arc, 140px, 24px value. Sessions are whole
+rows: mark, status, `space / tab`, `on <machine>` for remote, `go to →`.
+Settings: `── status bar` (live strip preview, Style, Show, names switch),
+`── dashboard` (Meters/Gauges, Terminal/Classic), `── redline` (60–90%),
+`── providers` (switches, per-limit chips), `── about this data`.
 
 ## How it behaves
 
@@ -34,9 +43,12 @@ Prefer focused agents, then working agents, then those needing attention,
 then other open agents; use the saved favorite order afterward. Configuration
 can hide providers, limit kinds or individual limits, toggle names and active
 ordering, and change redline to 60, 70, 80 or 90%. Save immediately in shared
-state. A click/right-click on the strip opens the window. Go to agent focuses
-its precise terminal. Buttons support keyboard focus and activation. The
-window can be repositioned without interrupting the shell.
+state. A click/right-click on the strip, Enter/Space on it, `cmd-shift-u` or
+`agent-quota.open` toggles the column; a pane header's quota button and
+`agent-quota.settings` always show it, on that provider or on Settings. `✕` and
+Escape hide it. Opening reads quota over a minute old; closing never reads. Go
+to agent focuses its precise terminal; the column stays open (the window,
+which covers the terminals, closes). Under 600px the legend gets its own row.
 
 ## Built from
 
@@ -44,17 +56,67 @@ One mod, `mods/agent-quota`, with `place: none`. The same View renders strip,
 dashboard or optional header using `props().mode`. Use Herdr's `knownAgents`,
 `agents`, `spaces` and `panes`; never scrape terminals. `core.js` handles
 quota schema 3–5, account lanes, visibility, activity ranking and freshness.
-`collector.js` executes quota-axi. A shared 45-second lease prevents duplicate
-reads across copies. Normal quota reads are every 120 seconds, discovery
-every 300 seconds, and failures back off to 600 seconds. Use native static
-geometry; no animation polling.
+`collector.js` executes quota-axi. Only the strip schedules reads: an in-memory
+check every 10 s compares agent statuses and runs `quota-axi` only when
+`schedule()` in `core.js` says one is due. Triggers: an agent finishing a turn
+(working → anything else), a limit reset passing, the dashboard opening on
+data over 60 s old, Refresh, a 3-minute backstop while any agent works and a
+10-minute one otherwise. Reads are at least 60 s apart; failures back off from
+60 s to 10 minutes. Routine reads pass `--provider` for providers with limits
+or local agents (0.07 s versus 0.6 s for all 19); every provider is swept
+hourly, on Refresh and after a failure. Pane headers only display. Paint meters
+with `window.paint_path`: each run of same-colored cells is one
+`PathBuilder.stroke(h)` line (or `arc_to`) with `dash_array([cell, gap])`. Use native motion (`frames`, `transition`); no animation polling.
+
+Collection always runs through `scripts/collect.mjs`. Herdr's `exec` stops any
+program at 30 s, so the supervisor must always finish first. It gives quota-axi
+at most 24 s from the supervisor's own start (and never past claim + 30 s), caps
+stdout at 1 MiB, and kills the collector's process group when it finishes, times
+out, or receives SIGTERM, SIGHUP or SIGINT. Each group is recorded in
+`.runtime/groups/`, so a group left by an untrappable SIGKILL is reaped by the
+next read. The supervisor returns as soon as quota-axi exits, after a 150 ms
+drain, even if a helper keeps stdout open. Raw audit JSON is reduced outside
+Herdr. Setup records the absolute Node, supervisor and quota-axi paths in the
+hidden `.runtime.json`. A 35-second shared claim prevents competing
+copies/builds from reading concurrently; retired and late results are discarded.
+The dashboard's spinner follows that shared claim. A Refresh inside the 10 s
+cooldown is queued, labelled "Queued" and run when the cooldown ends. A failed
+read marks only the providers it covered as stale. Discovery runs separately, hourly or on manual refresh (at most once
+a minute). Headers cache their provider's lanes until collection revision changes.
+Activity is grouped once per provider using a space map, independent of account count.
+
+Ordinary scroll areas eagerly build their offscreen content. Bound the dashboard
+and Settings to four provider/account sections per page, eight limit instruments
+or chips per account, and eight agent rows per account. Previous/Next controls
+keep every item reachable. Keep redline summary text bounded, with an overflow count.
 
 The installer clones through `layout.clone` to retain click state, changes
 only its clone, preserves the existing status mod and refuses unfamiliar
 headers or name collisions. Runtime paths are generated separately, never
-hardcoded to a particular user's home.
+hardcoded to a particular user's home. Saving any file in a mod folder reloads
+every copy, except hidden files, `.d.ts` files, `jsconfig.json` and `node_modules`.
+So setup writes its generated files hidden (`.runtime.json`, `.installation.json`).
+It then stages changed build files beside the mods folder and renames them in
+together, with no await between renames.
 
 ## Watch out
+
+Every path command is a separate call into the host. A polygon per cell (five
+calls) over a full dashboard ran past Herdr's render budget and showed
+`could not be re-rendered · interrupted`; keep calls independent of cell count.
+
+Test with as few hot reloads as possible. After ~20 reloads on Herdr 0.1.10,
+samples showed QuickJS JIT maintenance dominating the main thread. This suggests
+a runtime interaction; it does not establish a sole cause or rule out mod defects.
+Measure on a fresh window and compare against a matched baseline. Every `for (;;)`
+in a task must use `cx` each turn; `cx.phase()` checks lifecycle without a redraw.
+See `PERFORMANCE_REVIEW.md` for the review, regression tests and native acceptance gates.
+
+`on_size_change` runs during layout; a `cx.notify()` there re-renders inside
+layout and Herdr interrupts it (`could not be re-rendered · interrupted`).
+Repaint from `cx.spawn`. `setShared` re-renders every mod, so skip unchanged
+writes. Short limit names must stay unique per provider (Copilot has three
+monthly pools). An explicit per-limit choice overrides its kind default.
 
 Quota is per account, never per pane. Keep multiple accounts separate and
 do not infer a terminal's account. Remote activity is unlinked to local quota.
@@ -62,9 +124,57 @@ Unknown percentages stay unknown. A past reset suppresses the old value;
 stale values are historical and never count toward redline alerts. Used-share
 windows are not independent quota pools. Provider durations and limits vary.
 
-The Dock can have a different PATH. Try a packaged absolute collector, then
-PATH, then a fixed login-shell command. Do not insert report text into shell
-commands. Do not display subprocess stderr or persist raw reports. Collector
+Herdr's `exec` is capped at 30 s and 8 MiB. When it hits the cap it stops the
+program it started, not that program's detached children, so every subprocess
+budget must end well before 30 s. Herdr rejects for both a program that can't
+start and a program it stopped, so tell the two apart before showing a message.
+quota-axi's own detached helpers (claude-swap, delegated refresh) only run when
+credential refresh is on; keep `--no-credential-refresh`.
+
+Natively, Herdr's `exec` runs a program in Herdr's own process group and, at
+30 s, SIGKILLs that one pid. Its children survive, so never rely on Herdr to
+clean up a subprocess tree, and never signal the supervisor's own group.
+
+`child()` rejects `null` and `undefined` ("child(value) expects an element…").
+Optional parts go through `.when(...)` or `.children([...])`. `herdr-app check`
+renders only the initial (strip) description, so open the dashboard natively
+too before calling a build done.
+
+Dock a dashboard people open often as a hidden layout block toggled with
+`layout.toggle`/`layout.show`/`layout.hide`, not an overlay. Herdr builds a
+block's copy the first time it shows and keeps it while hidden; a window
+overlay builds a new copy on every open. Measured over 50 open/close cycles:
+the window retained about 0.25–0.29 MB per open, the column nothing (same as
+Herdr's own Files panel). Keep overlays for short-lived things (confirms,
+pickers, menus).
+
+`layout()` reports clicks: a hidden node has `hidden: true`, a shown one has no
+`hidden` key at all (not `false`). Test for `=== true`.
+
+A hidden block's timers keep running. The panel's minute repaint (age labels)
+fires only if the panel was drawn since the last tick, so a hidden panel stops
+redrawing the window after one tick. Provider/page requests reach the panel
+through shared `view` ({provider, page, at}); one older than the copy is not
+replayed.
+
+A window dashboard copy lives only while its window is open, so it asks the
+strip to read (`run("agent-quota.look")` / `"agent-quota.refresh"`) and reads
+itself only if nothing was claimed within 4 s. The panel never reads; its
+opener asks the strip. A claim left by a copy stopped mid-read is cleared by
+the strip's 10 s check once it expires.
+
+Herdr's window degraded to 100% CPU (JIT maintenance in `sample`) after a
+session of repeated hot reloads, layout round-trips and dozens of dashboard
+reopens. Install once, relaunch the window gracefully, and measure only on a
+fresh window.
+
+Limit ids are parsed twice: once in the supervisor and again in Herdr. Keep the
+id bound large enough that a fallback id (kind and label) survives the second
+parse whole.
+
+The Dock can have a different PATH. Use the setup-generated absolute paths;
+if unavailable, show setup instructions. Unbounded PATH/login-shell fallbacks
+defeat the supervisor and must not return. Do not display subprocess stderr or persist raw reports. Collector
 auth setup may need a one-time secure-store grant; do not trigger that from
 background polling. No inference requests. CLI execution and quota availability
 are different capabilities.
@@ -75,7 +185,9 @@ are different capabilities.
 - `herdr-app check mods/agent-quota` passes on a normal desktop session.
 - Installed percentages match local quota-axi readings.
 - The native dashboard renders correctly in both themes and at increased zoom.
-- Window dragging, keyboard focus, Configure and Go to agent work in Herdr.
+- The column toggles from the strip and `cmd-shift-u`, shows on a header's
+  provider and on Settings, hides with `✕`/Escape, and closing starts no read.
+- Window dragging, keyboard focus, Escape, Settings and Go to agent work in Herdr.
 - Restarting preserves settings; multiple surfaces still share one collector.
 - Remote activity is explicitly unlinked and expired data never looks fresh.
 - A real `preview.png` from Herdr is available before sharing publicly.

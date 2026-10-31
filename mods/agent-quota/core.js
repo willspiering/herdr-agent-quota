@@ -1,12 +1,29 @@
 // Pure data boundary. Only these allowlisted fields reach Herdr's shared state.
 export const PREFIX = "agent-quota.v1";
-export const POLL_MS = 120000;
-export const STALE_MS = 600000;
+// When to read quota. Agents finishing a turn drive reads; timers are only a backstop.
+export const CADENCE = {
+  gap: 60000,        // never closer together, however many agents finish
+  working: 180000,   // backstop while any agent works
+  idle: 600000,      // quota is also spent outside Herdr
+  look: 60000,       // opening the dashboard reads anything older
+  sweep: 3600000,    // every provider, to notice new sign-ins
+  discover: 3600000, // installed agents
+  retry: 60000,      // first retry after a failure, doubling to 10 minutes
+  manual: 10000,     // Refresh cooldown
+};
+export const STALE_MS = 900000;
 export const DEFAULTS = {
   hidden: [], kinds: { session: true, weekly: true, monthly: true, model: false, credits: true, unknown: true },
   windows: {}, signedOut: false, names: true, activeFirst: true,
   favorites: ["codex", "claude", "grok"], redline: 70,
+  strip: "meter", dash: "bars", metric: "used", palette: "terminal",
 };
+export const CHOICES = {
+  strip: ["meter", "blocks", "numbers"], dash: ["bars", "gauges"],
+  metric: ["used", "left"], palette: ["terminal", "classic"],
+};
+// Messages written by this mod. Anything else is replaced before it is stored or shown.
+export class QuotaError extends Error {}
 const text = (v, fallback = "", max = 120) => typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, max) : fallback;
 const number = v => typeof v === "number" && Number.isFinite(v) ? v : null;
 const percent = v => number(v) === null || v < 0 ? null : Math.min(100, v);
@@ -21,15 +38,16 @@ export function options(start = {}, saved = {}) {
     hidden: Array.isArray(o.hidden) ? o.hidden.filter(x => typeof x === "string") : [],
     favorites: Array.isArray(o.favorites) ? o.favorites.filter(x => typeof x === "string") : DEFAULTS.favorites,
     kinds: { ...DEFAULTS.kinds, ...start.kinds, ...saved.kinds },
-    windows: { ...start.windows, ...saved.windows },
+    windows: Object.fromEntries(Object.entries({ ...start.windows, ...saved.windows }).filter(([, v]) => typeof v === "boolean")),
     redline: [60, 70, 80, 90].includes(o.redline) ? o.redline : 70,
+    ...Object.fromEntries(Object.entries(CHOICES).map(([k, list]) => [k, list.includes(o[k]) ? o[k] : DEFAULTS[k]])),
   };
 }
 
 // Parse a complete JSON object, even after shell banners or ANSI status lines.
 // Never echo a malformed report or a subprocess error: it could contain credentials.
 export function parseReport(stdout, now = Date.now()) {
-  if (typeof stdout !== "string" || stdout.length > 8 * 1024 * 1024) throw new Error("Quota report is missing or too large.");
+  if (typeof stdout !== "string" || stdout.length > 8 * 1024 * 1024) throw new QuotaError("Quota report is missing or too large.");
   let report;
   let attempts = 0;
   for (let start = stdout.indexOf("{"); start >= 0 && attempts++ < 32; start = stdout.indexOf("{", start + 1)) {
@@ -46,25 +64,31 @@ export function parseReport(stdout, now = Date.now()) {
     }
     if (report) break;
   }
-  if (!report) throw new Error("Collector returned an unreadable quota report.");
-  if (![3, 4, 5].includes(report.schemaVersion)) throw new Error("Unsupported quota schema. This version supports schemas 3–5.");
+  if (!report) throw new QuotaError("Collector returned an unreadable quota report.");
+  if (![3, 4, 5].includes(report.schemaVersion)) throw new QuotaError("Unsupported quota schema. This version supports schemas 3–5.");
   const generated = stamp(report.generatedAt);
   const at = generated !== null && generated <= now + 60000 ? Math.min(generated, now) : now;
   const lanes = new Set();
   const providers = [];
-  for (const p of report.providers.slice(0, 200)) {
+  if (report.providers.length > 200) throw new QuotaError("Quota report has too many account lanes. Previous readings were kept.");
+  for (const p of report.providers) {
     if (!p || typeof p.provider !== "string") continue;
     const id = providerId(p.provider);
     if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id)) continue;
     const account = text(p.accountKey, "", 160) || (Array.isArray(p.accountKeys) ? p.accountKeys.map(x => text(x, "", 160)).filter(Boolean).sort().join("+") : "") || "default";
     const key = JSON.stringify([id, account]);
-    if (lanes.has(key)) throw new Error("Collector returned duplicate account lanes.");
+    if (lanes.has(key)) throw new QuotaError("Collector returned duplicate account lanes.");
     lanes.add(key);
     const untrusted = new Set(Array.isArray(p.untrustedWindowIds) ? p.untrustedWindowIds : []);
     const windowIds = new Set();
-    const windows = (Array.isArray(p.windows) ? p.windows : []).slice(0, 100).filter(Boolean).map(w => {
-      const wid = text(w.id) || JSON.stringify([text(w.kind, "unknown"), text(w.label, "Unnamed limit")]);
-      if (windowIds.has(wid)) throw new Error("Collector returned duplicate limit identities.");
+    if (Array.isArray(p.windows) && p.windows.length > 100) throw new QuotaError("Quota report has too many limits in an account. Previous readings were kept.");
+    const windows = (Array.isArray(p.windows) ? p.windows : []).filter(Boolean).map(w => {
+      // Ids round-trip through the supervisor's projection and are parsed twice, so the bound must
+      // hold a fallback id whole (kind and label, 120 each, JSON-escaped): truncating it on the
+      // second parse once collapsed long labels into "duplicate" limits. Same formula as fbb7f2b,
+      // so saved per-limit choices keep their keys.
+      const wid = text(w.id, "", 512) || JSON.stringify([text(w.kind, "unknown"), text(w.label, "Unnamed limit")]);
+      if (windowIds.has(wid)) throw new QuotaError("Collector returned duplicate limit identities.");
       windowIds.add(wid);
       const shareOf = text(w.shareOf) || null;
       const remaining = percent(w.percentRemaining);
@@ -85,6 +109,8 @@ export function parseReport(stdout, now = Date.now()) {
       status: text(p.state?.status, "unknown"), stale: p.state?.stale === true,
       at: refreshed !== null ? Math.min(refreshed, at) : at,
       reused: p.state?.reused === true, windows,
+      // quota-axi's own id, for targeted reads. Validated, never shell text.
+      axi: /^[a-z0-9][a-z0-9_-]{0,63}$/.test(p.provider) ? p.provider : null,
     });
   }
   return { schema: report.schemaVersion, at, providers };
@@ -120,17 +146,26 @@ export function resetLabel(w, now) {
   const mins = Math.ceil((w.resetsAt - now) / 60000), h = Math.floor(mins / 60);
   return `Resets in ${h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : h ? `${h}h ${mins % 60}m` : `${mins}m`}`;
 }
-export function shortLabel(w) {
-  if (w.kind === "session") return w.windowSeconds ? `${Math.round(w.windowSeconds / 360) / 10}h` : w.label || "Session";
-  return ({ weekly: "Week", monthly: "Month" })[w.kind] ?? w.label;
+const brief = w => w.kind === "session" && w.windowSeconds ? `${Math.round(w.windowSeconds / 360) / 10}h` : ({ weekly: "Week", monthly: "Month" })[w.kind] ?? w.label;
+// Short names stay distinct within a provider: three monthly pools keep their own labels.
+export function shortLabel(w, siblings = []) {
+  const short = brief(w);
+  if (!siblings.some(x => x !== w && brief(x) === short)) return short;
+  return w.label ? w.label[0].toUpperCase() + w.label.slice(1) : short;
 }
-export function visibleWindows(p, o) { return p.windows.filter(w => o.kinds[w.kind] !== false && o.windows[w.key] !== false); }
+// An explicit per-limit choice wins over its kind's default.
+export function shows(w, o) { return o.windows[w.key] ?? o.kinds[w.kind] !== false; }
+export function visibleWindows(p, o) { return p.windows.filter(w => shows(w, o)); }
+// The figure shown: used, or the remaining headroom. Health always follows usage.
+export function reading(w, o) { return o.metric === "left" ? 100 - w.percentUsed : w.percentUsed; }
 export function activeProvider(a) { return providerId(a.program?.key || a.app); }
 export function remoteAgent(a, spaces) { return a.address?.includes("/") || Boolean(spaces.find(s => s.id === a.space)?.machine); }
 
 export function catalog(report, discovered, live, spaces, o) {
   const list = (report?.providers ?? []).map(p => ({ ...p, installed: false, sessions: [], remote: false }));
   const byId = new Map();
+  const machines = new Map(spaces.map(s => [s.id, s.machine]));
+  const activity = new Map();
   for (const p of list) { if (!byId.has(p.id)) byId.set(p.id, []); byId.get(p.id).push(p); }
   const ensure = (id, label) => {
     if (!byId.has(id)) {
@@ -147,27 +182,92 @@ export function catalog(report, discovered, live, spaces, o) {
   for (const a of live) {
     const id = activeProvider(a);
     if (!id) continue;
-    const lanes = ensure(id, a.program?.name || id);
-    // Associate activity with the provider, never claim a particular account.
-    for (const p of lanes) { p.sessions.push(a); p.program ??= a.program; }
+    if (!activity.has(id)) activity.set(id, { sessions: [], local: [], remote: [], program: a.program, urgency: 0 });
+    const group = activity.get(id);
+    group.sessions.push(a);
+    (a.address?.includes("/") || machines.get(a.space) ? group.remote : group.local).push(a);
+    group.urgency = Math.max(group.urgency, a.focused ? 4 : a.status === "working" ? 3 : a.status === "blocked" ? 2 : 1);
+    ensure(id, a.program?.name || id);
   }
   for (const p of list) {
-    p.localSessions = p.sessions.filter(a => !remoteAgent(a, spaces));
-    p.remoteSessions = p.sessions.filter(a => remoteAgent(a, spaces));
+    const group = activity.get(p.id);
+    // The activity belongs to a provider, never a particular account. Classify once,
+    // then share read-only arrays across its lanes instead of scanning spaces per lane.
+    p.sessions = group?.sessions ?? [];
+    p.localSessions = group?.local ?? [];
+    p.remoteSessions = group?.remote ?? [];
+    p.program ??= group?.program;
     p.remote = p.sessions.length > 0 && p.localSessions.length === 0 && !p.installed && !p.windows.length;
     p.multiAccount = (byId.get(p.id)?.length ?? 0) > 1;
   }
-  const fav = id => { const i = o.favorites.indexOf(id); return i < 0 ? 1000 : i; };
-  const urgency = p => p.sessions.some(a => a.focused) ? 4 : p.sessions.some(a => a.status === "working") ? 3 : p.sessions.some(a => a.status === "blocked") ? 2 : p.sessions.length ? 1 : 0;
+  const favorites = new Map();
+  o.favorites.forEach((id, i) => { if (!favorites.has(id)) favorites.set(id, i); });
+  const fav = id => favorites.get(id) ?? 1000;
+  const urgency = p => activity.get(p.id)?.urgency ?? 0;
   return list.filter(p => p.installed || p.sessions.length || p.windows.length || o.signedOut)
     .sort((a, b) => (o.activeFirst ? urgency(b) - urgency(a) : 0) || fav(a.id) - fav(b.id) || a.label.localeCompare(b.label) || a.account.localeCompare(b.account));
 }
 
+/** @param {boolean | ((p: any) => boolean)} [failed] Whether a provider's last read failed. */
 export function redlines(list, o, now, failed = false) {
-  return list.flatMap(p => visibleWindows(p, o).filter(w => windowState(w, p, now, failed) === "fresh" && w.percentUsed >= o.redline).map(w => ({ p, w })));
+  const stale = typeof failed === "function" ? failed : () => failed;
+  return list.flatMap(p => visibleWindows(p, o).filter(w => windowState(w, p, now, stale(p)) === "fresh" && w.percentUsed >= o.redline).map(w => ({ p, w })));
+}
+
+// A collection failure, normalized: the message and the quota-axi ids it left stale (null: all).
+// Builds before this one stored only the message, which meant every provider.
+export function failure(value) {
+  if (typeof value === "string") return value ? { message: value, providers: null } : null;
+  if (!value || typeof value.message !== "string" || !value.message) return null;
+  return { message: value.message, providers: Array.isArray(value.providers) ? value.providers.filter(x => typeof x === "string") : null };
+}
+// Which providers stay stale after a read of `ids` (null: a sweep of every provider) that failed
+// with `message`, or succeeded when message is null. `known`: the ids that currently have data.
+export function failureAfter(previous, { message = null, ids = null, known = [] }) {
+  const before = failure(previous);
+  if (message) {
+    if (ids === null || (before && before.providers === null)) return { message, providers: null };
+    return { message, providers: [...new Set([...(before?.providers ?? []), ...ids])].sort() };
+  }
+  if (!before || ids === null) return null;
+  const read = new Set(ids), left = (before.providers ?? known).filter(id => !read.has(id));
+  return left.length ? { message: before.message, providers: [...new Set(left)].sort() } : null;
 }
 export function ageLabel(at, now) {
   if (!at) return "Not read yet";
   const m = Math.max(0, Math.floor((now - at) / 60000));
   return m < 1 ? "Updated just now" : m < 60 ? `Updated ${m}m ago` : `Updated ${Math.floor(m / 60)}h ${m % 60}m ago`;
+}
+
+// Why to read quota now, or null. Pure: every input is passed in.
+export function schedule({ now, control = null, hasData = false, force = false, looking = false, working = false, finished = false, resetDue = false }) {
+  const since = now - (control?.attempt ?? 0), failures = control?.failures ?? 0;
+  if (force) return since >= CADENCE.manual ? "manual" : null;
+  if (failures) return since >= Math.min(600000, CADENCE.retry * 2 ** Math.min(failures - 1, 4)) ? "retry" : null;
+  if (!hasData) return "first";
+  if (since < CADENCE.gap) return null;
+  if (finished) return "turn";
+  if (resetDue) return "reset";
+  if (looking && since >= CADENCE.look) return "look";
+  return since >= (working ? CADENCE.working : CADENCE.idle) ? (working ? "working" : "idle") : null;
+}
+export function needsSweep(control, now, reason) {
+  return ["manual", "first", "retry"].includes(reason) || now - (control?.sweptAt ?? 0) >= CADENCE.sweep;
+}
+// A limit reset after the last reading, so the shown value is known to be old.
+export function resetDue(data, control, now) {
+  const last = control?.attempt ?? 0;
+  return (data?.providers ?? []).some(p => p.windows.some(w => w.resetsAt !== null && w.resetsAt > last && w.resetsAt <= now - 15000));
+}
+// Providers worth a routine read: anything with limits, or an agent installed or running here.
+export function targets(data, discovered = [], live = []) {
+  const wanted = new Set([...discovered.filter(a => a.installed).map(a => providerId(a.key)), ...live.map(activeProvider)]);
+  const ids = (data?.providers ?? []).filter(p => p.axi && (p.windows.length || wanted.has(p.id))).map(p => p.axi);
+  return ids.length ? [...new Set(ids)].sort() : null;
+}
+// A targeted read replaces only the providers it covers; a sweep replaces everything.
+export function mergeReport(previous, next, swept) {
+  if (swept || !previous) return next;
+  const read = new Set(next.providers.map(p => p.id));
+  return { ...next, providers: [...previous.providers.filter(p => !read.has(p.id)), ...next.providers] };
 }

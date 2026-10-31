@@ -1,8 +1,9 @@
 # Herdr Agent Quota
 
 A [Herdr](https://herdr.dev) mod for monitoring agent quotas across your spaces.
-A compact status strip opens a graphical dashboard with usage gauges, reset
-countdowns, and a configurable redline that starts at 70% used.
+A terminal-styled status strip opens a dashboard of segmented usage meters or
+gauges, reset countdowns, pace and live agent activity, with a configurable
+redline that starts at 70% used. Colors follow your terminal theme.
 
 ## Setup
 
@@ -16,8 +17,21 @@ npm run setup
 
 For quota details in pane headers, use `npm run setup:headers` instead.
 Setup installs the collector and adds the mod to a cloned Herdr layout.
-Click the quota strip to open the dashboard and configure visible providers
-and limits. Quota availability depends on each provider and your sign-in.
+Click the quota strip (or press `cmd-shift-u`, `ctrl-shift-u` off macOS) to open
+the dashboard as a column beside your terminals; the same click closes it.
+Setup binds that key only if it is free. Settings, in the same column,
+chooses the strip style (Meter, Blocks, Numbers), Used or Left, the dashboard
+layout, colors, redline, and which providers and limits show. Changes apply
+immediately with a live preview. Quota availability depends on each provider
+and your sign-in.
+
+Each quota read runs quota-axi under a small Node supervisor. It finishes in
+under 24 s (Herdr stops any program at 30 s) and leaves no process behind.
+quota-axi is passed `--no-credential-refresh` and never makes inference
+requests.
+
+Optional keys in `keys.json`: `"agent-quota.open"`, `"agent-quota.settings"`
+and `"agent-quota.refresh"`.
 
 For Claude on macOS, you may need a one-time Keychain grant:
 
@@ -30,12 +44,15 @@ For Claude on macOS, you may need a one-time Keychain grant:
 ```sh
 npm ci --ignore-scripts
 npm test
+npm run typecheck   # strict, minus implicit-any and null checks, against ~/.config/herdr-app declarations
 npm run check
+npm run benchmark
 ```
 
 This is an early v1. Remote-account quota collection and absolute token counts
 are not implemented. Known issues and validation notes are in
-[VALIDATION.md](VALIDATION.md).
+[VALIDATION.md](VALIDATION.md). The performance review and remaining native
+checks are in [PERFORMANCE_REVIEW.md](PERFORMANCE_REVIEW.md).
 
 ## Credits
 

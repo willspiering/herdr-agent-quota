@@ -1,31 +1,33 @@
-import { parseReport } from "./core.js";
+import { parseReport, QuotaError } from "./core.js";
 
 export const ARGS = ["--json", "--full", "--max-age", "90s", "--no-credential-refresh"];
+// Herdr stops every exec at 30 s (herdr.d.ts). A read's supervisor never runs past the claim
+// time plus this, and never longer than its own 24 s budget from launch.
+export const READ_MS = 30000;
 
-// Try the bundled executable first, then PATH and the user's login shell.
-// All shell text is constant; no provider fields ever become executable text.
-export async function collect(exec, runtime = {}, now = Date.now()) {
-  const attempts = [];
-  if (typeof runtime.node === "string" && typeof runtime.collector === "string") {
-    attempts.push([runtime.node, [runtime.collector, ...ARGS]]);
-  }
-  attempts.push(["quota-axi", ARGS]);
-  attempts.push(["sh", ["-c", 'exec "${SHELL:-/bin/sh}" -lic "quota-axi --json --full --max-age 90s --no-credential-refresh" </dev/null']]);
-  for (const [command, args] of attempts) {
-    let result;
-    try { result = await exec(command, args); } catch { continue; }
-    // Exit 1 may contain a valid report describing unavailable providers.
-    if (result.code === 0 || result.code === 1) {
-      return parseReport(result.stdout, now);
-    }
-    // A found executable failing is not a reason to repeat all provider calls.
-    if (![126, 127].includes(result.code)) throw new Error("Collector failed. Check quota-axi in a terminal, then retry.");
-  }
-  throw new Error("Quota collector not found. Run npm run setup in the Herdr Agent Quota project.");
-}
+const ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const STOPPED = "Herdr stopped the quota read before it finished. Automatic retries will back off.";
 
-export function canCollect(control, now, force = false) {
-  if (control?.until > now) return false;
-  const wait = Math.min(600000, 120000 * 2 ** Math.min(control?.failures ?? 0, 3));
-  return force ? now - (control?.attempt ?? 0) >= 10000 : now - (control?.attempt ?? 0) >= wait;
+// Always go through the bounded Node supervisor: it owns the collector's process group, a budget
+// that ends before Herdr's cap, and the allowlist. Direct or login-shell fallbacks would not.
+export async function collect(exec, runtime = {}, now = Date.now(), providers = null, deadline = now + READ_MS) {
+  if (![runtime.node, runtime.collector, runtime.runner].every(p => typeof p === "string" && p.length > 0)) {
+    throw new QuotaError("Quota collector needs setup. Run npm run setup in the Herdr Agent Quota project.");
+  }
+  const ids = Array.isArray(providers) && providers.length && providers.every(id => ID.test(id)) ? providers : [];
+  let result;
+  try { result = await exec(runtime.node, [runtime.runner, runtime.collector, String(deadline), ...ids]); }
+  catch (error) {
+    // Herdr rejects both when a program can't start and when it hits the 30 s cap. Only the
+    // wording is inspected; it is never stored.
+    if (/longer than|was stopped/i.test(error instanceof Error ? error.message : String(error))) throw new QuotaError(STOPPED);
+    throw new QuotaError("Quota collector could not start. Run npm run setup in the Herdr Agent Quota project.");
+  }
+  const code = result?.code;
+  if (code === 0 || code === 1) return { report: parseReport(result.stdout, now), swept: ids.length === 0 };
+  if (code === 124) throw new QuotaError("Quota collection ran past its 24-second budget and was stopped. Automatic retries will back off.");
+  if (code === 125) throw new QuotaError("Quota report exceeded the collection budget. Previous readings were kept.");
+  if (code === 126 || code === 127) throw new QuotaError("Quota collector could not run. Run npm run setup, then retry.");
+  if (typeof code !== "number" || code < 0 || code >= 128) throw new QuotaError(STOPPED);
+  throw new QuotaError(`quota-axi exited with code ${code}. Run quota-axi in a terminal to check it.`);
 }
