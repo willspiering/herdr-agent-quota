@@ -191,7 +191,7 @@ Open issues:
   dialog. So the growth follows keyed-window replacement, not the dashboard's
   rendering. A true close and reopen through ✕/Escape could not be driven
   without pointer or keyboard automation (Escape could have reached an agent's
-  terminal). Not attributed; needs a Herdr-side look or a manual reopen test.
+  terminal). Resolved 2026-10-31 by docking the dashboard as a column; see below.
 - Not exercised natively in this session: the meter-row dashboard layout,
   Previous/Next with real multi-page data, the light theme, zoom, narrow widths,
   keyboard navigation, persistence of preferences across a restart, the
@@ -205,3 +205,41 @@ Open issues:
 - Inspect light theme, increased zoom, narrow widths, remote activity and
   stale/reset/partial-provider failures.
 - Capture an approved publication image without unrelated workspace content.
+
+## Dashboard as a layout column, 2026-10-31
+
+Native, on the running window (Herdr up about 2 h; a graceful relaunch was not
+available in this session, so compare deltas, not absolute sizes). Each open/close
+bench was 50 cycles, 1.5 s open and 1.5 s closed, footprint from `vmmap -summary`.
+A temporary bench mod (`place: none`, removed afterwards) opened and closed the
+real dashboard window by id exactly as the strip does, because the CLI cannot close
+a window overlay (`overlay.close` closes only dialogs and popups).
+
+| Run | Footprint | RSS | Retained |
+|---|---|---|---|
+| Window, build `90e6cae` | 180.3 → 194.6 MB (195 after 60 s) | 183 → 198 MB | about 0.29 MB per open, steady |
+| Window, new build (control, same process) | 210.9 → 222.9 MB (224 after 60 s) | 219 → 231 MB | about 0.24 MB per open, steady |
+| Column, opened from the strip (first run after install) | 205.0 → 210.9 MB | 213 → 219 MB | warm-up, flat from cycle 20 |
+| Column, from the strip (second run) | 228.8 → 237.2, 224.5 MB after 60 s | 237 → 246 MB | none after settling |
+| Column, `layout.toggle` only (no reads) | 225.7 → 226.2 MB after 60 s | 249 → 249 MB | none |
+| Herdr's own Files panel, `layout.toggle` (control) | 224.5 → 225.7 MB after 60 s | 246 → 249 MB | none |
+| 10 forced reads, column hidden | 226.2 → 226.1 MB | 249 → 249 MB | none |
+| 10 forced reads, column shown | 226.5 → 226.5 MB | 249 → 249 MB | none |
+
+Idle, 60 s each: build `90e6cae` 14.1% mean CPU (a stale dashboard window was open);
+new build with the column hidden 13.3%, shown 13.5%; JS 2.3–2.4% of main-thread
+samples, JIT maintenance about 1% (higher than the 0.7% measured on a fresh window
+earlier: the session had several installs and mod reloads). CPU while cycling: the
+window about 18–29% (a new copy built per open, plus reads), the column about 16%.
+
+Found natively: Herdr's `layout()` reports a toggled node's state, but a shown node
+has no `hidden` key, not `hidden: false`. The first build read the missing key as
+hidden and started a read on close; fixed with a regression test using the native
+shape, then confirmed: closing after 70 s open started no read; opening read the
+stale quota.
+
+Seen in screenshots: the column renders beside the terminal pane, framed like it,
+with gauges, sessions and the ✕ button; hiding it gives the terminal its width back.
+Not yet exercised natively: Escape and ✕ in the column (driven only through
+`layout.hide`), `cmd-shift-u` (bound, but not pressed), the column's meter-row
+layout, the light theme and zoom at column width, and resizing the column by drag.

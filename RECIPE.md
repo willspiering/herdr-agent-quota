@@ -17,7 +17,10 @@ foreground, muted and border tokens. The strip has 12px padding, 14px gaps and
 8-cell `▕███░░░░░▏` block bar, or nothing, then its percentage. Show fewer
 providers when space is tight, with a `+N` overflow count.
 
-The full view is a named 850×660 native window: a 17px title with agent,
+The full view is a column docked beside the terminals (hidden layout block
+`agent-quota-panel`, 460px, 380–900, framed like the panes: radius 10, 1px
+border, 16px inset). Layouts without that column get a named 850×660 native
+window instead (24px inset). Both have a 17px title with agent,
 space and update counts, `↻ Refresh` (a braille spinner while collecting) and
 `✕`; an Overview/Settings segmented control and `redline N%`. Each provider
 section is a 16px glyph, 14px name, `[plan]`, a 1px rule and its activity
@@ -40,9 +43,12 @@ Prefer focused agents, then working agents, then those needing attention,
 then other open agents; use the saved favorite order afterward. Configuration
 can hide providers, limit kinds or individual limits, toggle names and active
 ordering, and change redline to 60, 70, 80 or 90%. Save immediately in shared
-state. A click/right-click on the strip opens the window. Go to agent focuses
-its precise terminal. Buttons support keyboard focus and activation. The
-window can be repositioned without interrupting the shell.
+state. A click/right-click on the strip, Enter/Space on it, `cmd-shift-u` or
+`agent-quota.open` toggles the column; a pane header's quota button and
+`agent-quota.settings` always show it, on that provider or on Settings. `✕` and
+Escape hide it. Opening reads quota over a minute old; closing never reads. Go
+to agent focuses its precise terminal; the column stays open (the window,
+which covers the terminals, closes). Under 600px the legend gets its own row.
 
 ## Built from
 
@@ -134,16 +140,33 @@ Optional parts go through `.when(...)` or `.children([...])`. `herdr-app check`
 renders only the initial (strip) description, so open the dashboard natively
 too before calling a build done.
 
-A dashboard copy lives only while its window is open, so it asks the strip to
-read (`run("agent-quota.look")` / `"agent-quota.refresh"`) and reads itself only
-if nothing was claimed within 4 s. A claim left by a copy stopped mid-read is
-cleared by the strip's 10 s check once it expires.
+Dock a dashboard people open often as a hidden layout block toggled with
+`layout.toggle`/`layout.show`/`layout.hide`, not an overlay. Herdr builds a
+block's copy the first time it shows and keeps it while hidden; a window
+overlay builds a new copy on every open. Measured over 50 open/close cycles:
+the window retained about 0.25–0.29 MB per open, the column nothing (same as
+Herdr's own Files panel). Keep overlays for short-lived things (confirms,
+pickers, menus).
+
+`layout()` reports clicks: a hidden node has `hidden: true`, a shown one has no
+`hidden` key at all (not `false`). Test for `=== true`.
+
+A hidden block's timers keep running. The panel's minute repaint (age labels)
+fires only if the panel was drawn since the last tick, so a hidden panel stops
+redrawing the window after one tick. Provider/page requests reach the panel
+through shared `view` ({provider, page, at}); one older than the copy is not
+replayed.
+
+A window dashboard copy lives only while its window is open, so it asks the
+strip to read (`run("agent-quota.look")` / `"agent-quota.refresh"`) and reads
+itself only if nothing was claimed within 4 s. The panel never reads; its
+opener asks the strip. A claim left by a copy stopped mid-read is cleared by
+the strip's 10 s check once it expires.
 
 Herdr's window degraded to 100% CPU (JIT maintenance in `sample`) after a
 session of repeated hot reloads, layout round-trips and dozens of dashboard
 reopens. Install once, relaunch the window gracefully, and measure only on a
-fresh window. Reopening the keyed dashboard window also retained about 0.4 MB
-per reopen in one test (see `VALIDATION.md`).
+fresh window.
 
 Limit ids are parsed twice: once in the supervisor and again in Herdr. Keep the
 id bound large enough that a fallback id (kind and label) survives the second
@@ -162,6 +185,8 @@ are different capabilities.
 - `herdr-app check mods/agent-quota` passes on a normal desktop session.
 - Installed percentages match local quota-axi readings.
 - The native dashboard renders correctly in both themes and at increased zoom.
+- The column toggles from the strip and `cmd-shift-u`, shows on a header's
+  provider and on Settings, hides with `✕`/Escape, and closing starts no read.
 - Window dragging, keyboard focus, Escape, Settings and Go to agent work in Herdr.
 - Restarting preserves settings; multiple surfaces still share one collector.
 - Remote activity is explicitly unlinked and expired data never looks fresh.

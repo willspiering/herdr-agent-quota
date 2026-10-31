@@ -99,7 +99,10 @@ resets and sessions 11; strip limit names, captions and footer 10.
 
 ## Layout
 
-The dashboard is an 850 × 660 native window: header (24 inset, 18 top),
+The dashboard docks as a column beside the terminals: 460 wide (380–900,
+resizable), radius 10 and a 1px border like the pane frames, 16 inset; under
+600 wide the legend moves to its own row below the tabs. Layouts without the
+column get an 850 × 660 native window (24 inset). Both: header (18 top),
 Overview/Settings segmented control with `redline N%`, a 1px rule, the
 scrolling body and a one-line footer. Provider sections are 16 vertical
 padding with a `glyph name [plan] ───── activity` heading.

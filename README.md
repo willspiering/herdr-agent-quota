@@ -17,7 +17,9 @@ npm run setup
 
 For quota details in pane headers, use `npm run setup:headers` instead.
 Setup installs the collector and adds the mod to a cloned Herdr layout.
-Click the quota strip to open the dashboard. Settings, in the same window,
+Click the quota strip (or press `cmd-shift-u`, `ctrl-shift-u` off macOS) to open
+the dashboard as a column beside your terminals; the same click closes it.
+Setup binds that key only if it is free. Settings, in the same column,
 chooses the strip style (Meter, Blocks, Numbers), Used or Left, the dashboard
 layout, colors, redline, and which providers and limits show. Changes apply
 immediately with a live preview. Quota availability depends on each provider

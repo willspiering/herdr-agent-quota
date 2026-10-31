@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- The dashboard opens as a column beside the terminals instead of a floating
+  window: a hidden layout block Herdr shows and hides, so opening and closing it
+  allocates nothing (the window retained about 0.25 MB per open). Toggle it with
+  the strip or `cmd-shift-u` (bound by setup only if free); `✕`/Escape hide it.
+  Go to agent leaves it open. Layouts without the column keep the window. Run
+  setup again to add the column.
+
 - Fix (F1): Herdr's 30 s `exec` cap stopped the supervisor first and left
   quota-axi running with no limit. The supervisor now finishes within 24 s of
   its own start, kills the collector's group on SIGTERM/SIGHUP/SIGINT, and the
