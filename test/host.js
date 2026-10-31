@@ -95,7 +95,7 @@ export function cappedExec(runner, { cap = EXEC_CAP_MS, onStop = () => {} } = {}
   });
 }
 
-export async function createHost({ nextCommand = () => new Promise(() => {}), mode = "dashboard", data = null, live = [], installed = [], paneList = [], spaceList = [], runtime = {}, runtimeFile = null, runner, sharedState, clock, source: inputSource, coreModule = core, collectorModule = collector, execCap = EXEC_CAP_MS } = {}) {
+export async function createHost({ nextCommand = () => new Promise(() => {}), mode = "dashboard", data = null, live = [], installed = [], paneList = [], spaceList = [], runtime = {}, runtimeFile = null, runner, sharedState, clock, source: inputSource, coreModule = core, collectorModule = collector, execCap = EXEC_CAP_MS, layoutTree = null } = {}) {
   const source = inputSource ?? await readFile(new URL("../mods/agent-quota/main.js", import.meta.url), "utf8");
   const state = sharedState ?? { [`${core.PREFIX}.data`]: copy(data), [`${core.PREFIX}.discovered`]: copy(installed) };
   const properties = { mode, ...runtime };
@@ -123,12 +123,14 @@ export async function createHost({ nextCommand = () => new Promise(() => {}), mo
     setShared: (name, value) => { writes.push(name); state[name] = copy(value); renders.requested++; return null; },
     props: () => properties, openOverlay: spec => { overlays.push(spec); return "overlay"; }, closeOverlay: id => commands.push(["close", id]),
     nextCommand, run: (name, args) => commands.push([name, args]),
+    // The shown layout with its clicks applied (a toggled node's `hidden`), or null.
+    layout: () => copy(layoutTree),
   };
   const deps = { ...constructors, ...api, ...coreModule, ...collectorModule, Date: clock ? class extends Date { static now() { return clock.now; } } : Date };
   const code = source.replace(/import[\s\S]*?from\s+"[^";]+";/g, "").replace("export function colors", "function colors").replace("export default class AgentQuota", "class AgentQuota");
   const AgentQuota = new Function(...Object.keys(deps), `${code}\nreturn AgentQuota;`)(...Object.values(deps));
   const view = new AgentQuota(); view.init(properties, cx);
-  return { view, cx, state, tasks, spawns, timers, overlays, commands, writes, reads, renders, sharedReads, properties, focus,
+  return { view, cx, state, setLayout(next) { layoutTree = next; }, tasks, spawns, timers, overlays, commands, writes, reads, renders, sharedReads, properties, focus,
     retire() { retired = true; },
     tree() {
       phase = "render";

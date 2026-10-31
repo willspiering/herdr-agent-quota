@@ -1,9 +1,9 @@
-import { readFile, writeFile, mkdir, access } from "node:fs/promises";
+import { readFile, writeFile, mkdir, access, rename } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { integrateLayout, MOD } from "./layout.mjs";
+import { integrateLayout, bindToggle, MOD } from "./layout.mjs";
 import { swapBuild } from "./swap.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -35,7 +35,7 @@ try {
   await mkdir(join(root, "artifacts"), { recursive: true });
   await writeFile(join(root, "artifacts/layout-preview.json"), JSON.stringify(preview, null, 2) + "\n");
   if (args.has("--plan")) {
-    console.log(`Plan: install mods/${MOD}, clone ${sourceName} as ${cloneName}, add a quota status block${args.has("--headers") ? " and pane headers" : ""}.`);
+    console.log(`Plan: install mods/${MOD}, clone ${sourceName} as ${cloneName}, add a quota status block, a hidden dashboard column${args.has("--headers") ? ", pane headers" : ""} and a free toggle key.`);
     console.log("The mod runs quota-axi, which reads local agent sign-ins and calls first-party provider usage services. No keys are copied into the mod.");
     console.log("Layout preview: artifacts/layout-preview.json. Herdr configuration was not changed.");
     process.exit(0);
@@ -70,10 +70,20 @@ try {
   await writeFile(layoutPath, JSON.stringify(next, null, 2) + "\n");
   await writeFile(markerPath, JSON.stringify({ project: "herdr-agent-quota", version: "0.1.0", layout: cloneName, previousLayout: marker?.previousLayout ?? sourceName, source: root }, null, 2) + "\n");
   cli("herdr-app", ["do", "layout.switch", JSON.stringify({ name: cloneName })]);
+  // A key for the dashboard column, only if it is free; the person's keys are never replaced.
+  const keysPath = join(home, "keys.json");
+  const keysText = await readFile(keysPath, "utf8").catch(() => "{}");
+  const keys = bindToggle(JSON.parse(keysText));
+  if (keys && JSON.stringify(keys) !== JSON.stringify(JSON.parse(keysText))) {
+    await writeFile(`${keysPath}.agent-quota-tmp`, JSON.stringify(keys, null, 2) + "\n");
+    await rename(`${keysPath}.agent-quota-tmp`, keysPath);
+  }
+  const toggleKey = process.platform === "darwin" ? "cmd-shift-u" : "ctrl-shift-u";
+  console.log(keys ? `Dashboard key: ${toggleKey} (in the agent-quota layout).` : `${toggleKey} is already bound; the dashboard opens from the quota strip.`);
   cli("herdr-app", ["check", installedPath]);
   const status = cli("herdr-app", ["status"]);
   await writeFile(join(root, "artifacts/install-status.txt"), status);
   console.log(status.trim());
-  console.log(`Installed. Click the quota strip at the bottom right. Original layout: ${marker?.previousLayout ?? sourceName}.`);
+  console.log(`Installed. Click the quota strip at the bottom right to open the dashboard column. Original layout: ${marker?.previousLayout ?? sourceName}.`);
   console.log(`To return: herdr-app do layout.switch '{"name":"${marker?.previousLayout ?? sourceName}"}'`);
 } catch (error) { console.error(error.message); process.exitCode = 1; }
