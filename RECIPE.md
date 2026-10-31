@@ -3,8 +3,8 @@
 A quiet quota readout at the right end of Herdr's status bar opens a graphical
 view of account limits and agent activity. Each limit has a speedometer-like
 gauge and a visible red zone from 70% used. Codex, Claude and Grok lead when
-no active agent takes priority. A publication screenshot is pending native
-installation and validation; no synthetic image is represented as a live capture.
+no active agent takes priority. A publication screenshot is pending broader
+native validation; no synthetic image is represented as a live capture.
 
 ## What you see
 

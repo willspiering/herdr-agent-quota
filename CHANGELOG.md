@@ -17,7 +17,9 @@
 - Shared collector lease, bounded refresh frequency and failure backoff.
 - Clone-based installer, setup plan, synthetic preview and regression suite.
 
-Known gaps: native check and visual verification require a normal desktop
-terminal. Dependencies and their lockfile are not installed in the restricted
-development session. Remote account collection and token-count telemetry are
-not implemented. No public repository or release has been published.
+Local setup has completed, including the installer's native checks. Initial
+live visual inspection covered the strip, pane header, dashboard and Configure.
+A transient dashboard render interruption remains open; closing and reopening
+restored the view. Claude quota currently requires authentication. Remote account
+collection and token-count telemetry are not implemented. No public repository
+or release has been published. See VALIDATION.md for evidence and remaining checks.

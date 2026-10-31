@@ -68,7 +68,7 @@ components:
 
 The installed Herdr theme is the visual authority. This native GPUI mod follows the compact status-bar-to-dashboard workflow of Lakris2407/herdr-quota, with graphical instruments for quota pressure. It adds health colors and gauge geometry without introducing a separate web identity.
 
-The strip is dense and quiet; the dashboard provides provider limits and session activity in a scrollable native window. Account quota and session activity remain visually distinct. This record comes from `mods/agent-quota/main.js` and `core.js`, with product constraints from `PRODUCT.md`. It is a source-derived system, not evidence of native visual verification. A native trial remains pending.
+The strip is dense and quiet; the dashboard provides provider limits and session activity in a scrollable native window. Account quota and session activity remain visually distinct. This record comes from `mods/agent-quota/main.js` and `core.js`, with product constraints from `PRODUCT.md`. A subsequent dark-theme native spot check is recorded in `VALIDATION.md`; broader native verification remains open.
 
 **Key Characteristics:**
 - Native theme inheritance for surfaces, text, focus and agent activity.

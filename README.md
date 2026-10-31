@@ -3,11 +3,12 @@
 Account quota gauges and live agent activity across Herdr spaces. A compact
 status strip opens a graphical dashboard. Limits redline at **70% used**.
 
-Version **0.1.0 — native validation pending**. The source and installer are
-ready for a local trial. This development session could not connect to macOS
-UI services or write Herdr's configuration, so the mod has **not been installed
-or verified in a running Herdr window**. Do not describe this as a completed
-release until the native checks below pass.
+Version **0.1.0 — installed local trial**. Setup completed on the local desktop;
+its post-check status snapshot reports the `agent-quota` layout with no errors.
+The status strip, pane header, graphical dashboard and Configure view have
+been inspected in the running Herdr window. Broader native validation is still
+open. One dashboard render interruption was observed and cleared by closing
+and reopening the window; it remains a tracked issue. See [VALIDATION.md](VALIDATION.md).
 
 ## What v1 includes
 
@@ -196,7 +197,7 @@ Before release:
    attributed to the remote terminal.
 6. Disable collection temporarily; verify stale and expired readings are clear.
 7. Capture a real `herdr-app shot preview.png` for publication.
-8. Commit a dependency lockfile after a successful npm installation.
+8. Keep the committed dependency lockfile aligned with tested installations.
 
 ## Return to your original layout
 
