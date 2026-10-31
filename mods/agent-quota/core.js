@@ -83,7 +83,11 @@ export function parseReport(stdout, now = Date.now()) {
     const windowIds = new Set();
     if (Array.isArray(p.windows) && p.windows.length > 100) throw new QuotaError("Quota report has too many limits in an account. Previous readings were kept.");
     const windows = (Array.isArray(p.windows) ? p.windows : []).filter(Boolean).map(w => {
-      const wid = text(w.id) || JSON.stringify([text(w.kind, "unknown"), text(w.label, "Unnamed limit")]);
+      // Ids round-trip through the supervisor's projection and are parsed twice, so the bound must
+      // hold a fallback id whole (kind and label, 120 each, JSON-escaped): truncating it on the
+      // second parse once collapsed long labels into "duplicate" limits. Same formula as fbb7f2b,
+      // so saved per-limit choices keep their keys.
+      const wid = text(w.id, "", 512) || JSON.stringify([text(w.kind, "unknown"), text(w.label, "Unnamed limit")]);
       if (windowIds.has(wid)) throw new QuotaError("Collector returned duplicate limit identities.");
       windowIds.add(wid);
       const shareOf = text(w.shareOf) || null;
@@ -205,7 +209,28 @@ export function catalog(report, discovered, live, spaces, o) {
 }
 
 export function redlines(list, o, now, failed = false) {
-  return list.flatMap(p => visibleWindows(p, o).filter(w => windowState(w, p, now, failed) === "fresh" && w.percentUsed >= o.redline).map(w => ({ p, w })));
+  const stale = typeof failed === "function" ? failed : () => failed;
+  return list.flatMap(p => visibleWindows(p, o).filter(w => windowState(w, p, now, stale(p)) === "fresh" && w.percentUsed >= o.redline).map(w => ({ p, w })));
+}
+
+// A collection failure, normalized: the message and the quota-axi ids it left stale (null: all).
+// Builds before this one stored only the message, which meant every provider.
+export function failure(value) {
+  if (typeof value === "string") return value ? { message: value, providers: null } : null;
+  if (!value || typeof value.message !== "string" || !value.message) return null;
+  return { message: value.message, providers: Array.isArray(value.providers) ? value.providers.filter(x => typeof x === "string") : null };
+}
+// Which providers stay stale after a read of `ids` (null: a sweep of every provider) that failed
+// with `message`, or succeeded when message is null. `known`: the ids that currently have data.
+export function failureAfter(previous, { message = null, ids = null, known = [] }) {
+  const before = failure(previous);
+  if (message) {
+    if (ids === null || (before && before.providers === null)) return { message, providers: null };
+    return { message, providers: [...new Set([...(before?.providers ?? []), ...ids])].sort() };
+  }
+  if (!before || ids === null) return null;
+  const read = new Set(ids), left = (before.providers ?? known).filter(id => !read.has(id));
+  return left.length ? { message: before.message, providers: [...new Set(left)].sort() } : null;
 }
 export function ageLabel(at, now) {
   if (!at) return "Not read yet";

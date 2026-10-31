@@ -119,10 +119,10 @@ test("targeted reads use supervised argv and invalid provider ids cause a sweep"
   const calls = [];
   const runner = async (cmd, args) => { calls.push([cmd, args]); return { code: 0, stdout: JSON.stringify(report()) }; };
   const result = await collect(runner, runtime, now, ["claude", "codex"]);
-  assert.deepEqual(calls[0], ["/node", ["/runner", "/collector", String(now + 35000), "claude", "codex"]]);
+  assert.deepEqual(calls[0], ["/node", ["/runner", "/collector", String(now + 30000), "claude", "codex"]]);
   assert.equal(result.swept, false);
   await collect(runner, runtime, now, ["bad id;rm"]);
-  assert.deepEqual(calls[1][1], ["/runner", "/collector", String(now + 35000)]);
+  assert.deepEqual(calls[1][1], ["/runner", "/collector", String(now + 30000)]);
   for (const code of [124, 125, 126]) await assert.rejects(collect(async () => ({ code, stdout: "SECRET" }), runtime, now), QuotaError);
 });
 test("the scheduler reads after a turn, never closer than a minute", () => {

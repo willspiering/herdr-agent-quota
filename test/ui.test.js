@@ -122,12 +122,12 @@ test("unexpected exceptions are never stored verbatim", async () => {
   host.view.runtime = { node: "/node", runner: "/runner", collector: "/collector" };
   host.view.tick(host.cx);
   await host.tasks.at(-1)(host.cx);
-  assert.match(host.state[`${PREFIX}.error`], /could not start/);
+  assert.match(host.state[`${PREFIX}.error`].message, /could not start/);
   const broken = await createHost({ data, runner: async () => ({ code: 0, get stdout() { throw new TypeError("SECRET"); } }) });
   broken.view.runtime = host.view.runtime;
   broken.view.tick(broken.cx);
   await broken.tasks.at(-1)(broken.cx);
-  assert.doesNotMatch(broken.state[`${PREFIX}.error`], /SECRET/);
+  assert.doesNotMatch(JSON.stringify(broken.state[`${PREFIX}.error`]), /SECRET/);
 });
 test("unchanged shared values are not rewritten", async () => {
   const host = await createHost({ data });

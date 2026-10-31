@@ -7,9 +7,9 @@ import {
 import {
   PREFIX, options, providerId, catalog, visibleWindows, shows, reading, windowState,
   elapsed, pace, resetLabel, shortLabel, redlines, ageLabel, remoteAgent, QuotaError,
-  CADENCE, schedule, needsSweep, resetDue, targets, mergeReport,
+  CADENCE, schedule, needsSweep, resetDue, targets, mergeReport, failure, failureAfter,
 } from "./core.js";
-import { collect } from "./collector.js";
+import { collect, READ_MS } from "./collector.js";
 
 const key = suffix => `${PREFIX}.${suffix}`;
 /** @returns {any} Application-owned, normalized shared state. */
@@ -29,9 +29,10 @@ const STATE_MARK = { working: "●", blocked: "▲", done: "✓", idle: "○" };
 const ICONS = { claude: "claude", codex: "codex", grok: "grok", cursor: "cursor", copilot: "copilot", kimi: "kimi" };
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 // Coordination is shared across copies/builds, not a module variable whose lifetime depends
-// on Herdr's module cache. The supervised process ends within 31 s; a 45 s claim can recover
-// after cancellation without overlapping a still-running collector.
-const CLAIM_MS = 45000;
+// on Herdr's module cache. A read can't outlive claim + READ_MS: its supervisor stops at that
+// deadline (or 24 s after its own launch, if sooner), and Herdr's exec cap is 30 s. The claim
+// lasts 5 s longer, so a cancelled copy's claim recovers without overlapping a live read.
+const CLAIM_MS = READ_MS + 5000;
 const PROVIDER_PAGE = 4, LIMIT_PAGE = 8, SESSION_PAGE = 8;
 const CLASSIC = { dark: ["#80c9ae", "#e1bc75", "#f48e83"], light: ["#226b50", "#79530c", "#ad302d"] };
 
@@ -70,6 +71,7 @@ export default class AgentQuota extends View {
     this.keys = cx.focus_handle();
     this.runtime = {};
     this.pending = false;
+    this.queued = false;
     this.statuses = null;
     this.finishedAt = 0;
     this.pages = {};
@@ -125,10 +127,13 @@ export default class AgentQuota extends View {
     // Overview lists what can be read or acted on; Settings lists everything.
     const useful = p => p.windows.length || p.sessions.length || p.status === "auth_required" || o.signedOut;
     const config = settings(), font = config.font_family;
-    return { o, all, shown: all.filter(p => !o.hidden.includes(p.id) && useful(p)), now: Date.now(), failed: Boolean(get("error")),
+    // A failure leaves only the providers its read covered stale.
+    const error = failure(get("error"));
+    const stale = p => Boolean(error) && (error.providers === null || error.providers.includes(p.axi ?? p.id));
+    return { o, all, shown: all.filter(p => !o.hidden.includes(p.id) && useful(p)), now: Date.now(), failed: Boolean(error), error, stale,
       agents: live, spaces: places, pane, t: colors(theme(), config.dark !== false, o.palette), mono: typeof font === "string" ? font : "JetBrains Mono" };
   }
-  state(w, p) { return windowState(w, p, this.f.now, this.f.failed); }
+  state(w, p) { return windowState(w, p, this.f.now, this.f.stale(p)); }
 
   // Size reports arrive during layout, where Herdr interrupts a re-render. Repaint from a task
   // instead, and only when the width changes what is drawn.
@@ -139,7 +144,19 @@ export default class AgentQuota extends View {
     cx.spawn(async cx => cx.notify());
   }
 
-  refresh(cx) { this.tick(cx, { force: true }); }
+  // A Refresh is never dropped silently: during a read the spinner shows it (whichever copy
+  // reads); inside the cooldown it is queued, shown, and run when the cooldown ends.
+  refresh(cx) {
+    const now = Date.now(), control = get("control");
+    if (this.pending || control?.busyUntil > now) { cx.notify(); return; }
+    const wait = CADENCE.manual - (now - (control?.attempt ?? 0));
+    if (wait <= 0) { this.tick(cx, { force: true }); return; }
+    if (!this.queued) {
+      this.queued = true;
+      cx.timer.after(wait, cx => { this.queued = false; this.tick(cx, { force: true }); cx.notify(); });
+    }
+    cx.notify();
+  }
 
   // A turn has finished when an agent that was working no longer is (or has gone).
   observe(now, live = agents()) {
@@ -172,7 +189,7 @@ export default class AgentQuota extends View {
       const next = { attempt: now, failures: 0, sweptAt: control?.sweptAt ?? 0, discoveredAt: control?.discoveredAt ?? 0, reason };
       let result, error = null;
       try {
-        result = await collect(exec, this.runtime, Date.now(), ids, now + CLAIM_MS - 5000);
+        result = await collect(exec, this.runtime, Date.now(), ids, now + READ_MS);
         if (result.swept) next.sweptAt = now;
       } catch (e) {
         // Only this mod's own messages are kept; anything else could echo subprocess output.
@@ -182,8 +199,9 @@ export default class AgentQuota extends View {
       cx.phase();
       // A late answer from an expired/replaced claim must not clobber newer readings.
       if (get("control")?.token !== token) { this.pending = false; return; }
+      const known = (get("data")?.providers ?? []).map(p => p.axi).filter(Boolean);
       if (result) put("data", mergeReport(get("data"), result.report, result.swept));
-      put("error", error);
+      put("error", failureAfter(get("error"), { message: error, ids: sweep ? null : ids, known }));
       // Discovery isn't on the collection critical path and never holds its claim open.
       const discover = now - next.discoveredAt >= CADENCE.discover || (reason === "manual" && now - next.discoveredAt >= CADENCE.gap);
       if (discover) next.discoveredAt = now; // rate-limit failures too
@@ -407,11 +425,11 @@ export default class AgentQuota extends View {
         .when(!ws.length, el => el.child(label("—", 11, t.muted)))
         .children(ws.map(w => this.stripWindow(w, p)));
     });
-    return { items, hidden: candidates.length - fits.length };
+    return { items, hidden: candidates.length - fits.length, stale: fits.some(this.f.stale) };
   }
 
   strip() {
-    const { t, failed } = this.f, { items, hidden } = this.stripItems(this.width);
+    const { t, failed } = this.f, { items, hidden, stale } = this.stripItems(this.width);
     return h_flex().id("agent-quota-strip").size_full().px(12).gap(14).items_center().justify_end().overflow_hidden()
       .font_family(this.f.mono)
       .on_size_change((s, cx) => this.resized(s, cx))
@@ -423,10 +441,10 @@ export default class AgentQuota extends View {
       .tooltip("Agent quota · click for details")
       .on_click(() => this.open()).on_mouse_down("right", () => this.open())
       .on_key_down(e => { if (e.key === "enter" || e.key === "space") this.open(); })
-      .when(!items.length, el => el.child(label(failed ? "quota · setup needed" : "quota · waiting for agents", 11, t.muted)))
+      .when(!items.length, el => el.child(label(failed ? "quota · needs attention" : "quota · waiting for agents", 11, t.muted)))
       .children(items)
       .when(hidden > 0, el => el.child(label(`+${hidden}`, 11, t.muted)))
-      .when(failed && items.length > 0, el => el.child(label("stale", 10, t.warning)));
+      .when(stale, el => el.child(label("stale", 10, t.warning)));
   }
 
   // ── dashboard ────────────────────────────────────────────
@@ -578,8 +596,9 @@ export default class AgentQuota extends View {
     const selected = props()?.provider;
     const list = selected ? shown.filter(p => p.id === selected) : shown;
     const providerPage = this.pageItems("overview-providers", list, PROVIDER_PAGE);
-    const lines = this.page === "overview" ? redlines(shown, o, now, failed) : [];
-    const busy = this.pending;
+    const lines = this.page === "overview" ? redlines(shown, o, now, this.f.stale) : [];
+    // Busy is shared: another copy's read shows here too.
+    const busy = this.pending || get("control")?.busyUntil > now, queued = !busy && this.queued;
     const count = this.f.agents.length;
     const toSettings = (_e, cx) => { this.page = "configure"; cx.notify(); };
     const body = this.page === "configure" ? this.configure() : v_flex()
@@ -601,7 +620,9 @@ export default class AgentQuota extends View {
         .child(v_flex().gap(4).flex_1().min_w(0)
           .child(label("Agent quota", 17, t.foreground).font_semibold())
           .child(label(`${count} ${count === 1 ? "agent" : "agents"} · ${this.f.spaces.length} spaces · ${ageLabel(get("data")?.at, now).toLowerCase()}`, 11, t.muted).truncate()))
-        .child(this.button("refresh", busy ? "Refreshing" : "↻ Refresh", (_e, cx) => this.refresh(cx), t, { a11y: busy ? "Refreshing quota" : "Refresh quota" })
+        .child(this.button("refresh", busy ? "Refreshing" : queued ? "Queued" : "↻ Refresh", (_e, cx) => this.refresh(cx), t,
+          { a11y: busy ? "Refreshing quota" : queued ? "Refresh queued" : "Refresh quota" })
+          .when(queued, el => el.tooltip("Read moments ago. Reading again when the 10-second cooldown ends."))
           .when(busy, el => el.child(div().w(10).text_color(t.muted).frames(SPINNER, 90).child(SPINNER[0]))))
         .when(Boolean(props()?.overlay), el => el.child(this.button("close", "✕", () => this.dismiss(), t, { a11y: "Close" }))))
       .child(h_flex().px(24).pb(12).gap(8).items_center().flex_none()
@@ -612,7 +633,7 @@ export default class AgentQuota extends View {
       .child(v_flex().id(`quota-scroll-${this.page}`).flex_1().min_h(0).px(24).overflow_y_scrollbar()
         .when(failed, el => el.child(v_flex().mt(14).px(12).py(10).gap(4).rounded(4).border(1).border_color(t.warning)
           .child(label("Quota needs attention", 12, t.warning).font_medium())
-          .child(label(get("error"), 11, t.foreground))
+          .child(label(this.f.error.message, 11, t.foreground))
           .child(label("Earlier readings stay marked stale until collection works again.", 11, t.muted))))
         .child(body))
       .child(rule(t))

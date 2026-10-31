@@ -27,6 +27,7 @@ test("independent module copies share a single claim before any asynchronous wor
   assert.equal(strip.tasks.length, 3); assert.equal(dash.tasks.length, 1);
   const pending = strip.tasks[2](strip.cx);
   dash.view.tick(dash.cx, { force: true });
+  await new Promise(r => setImmediate(r)); // Herdr's exec starts asynchronously
   assert.equal(calls, 1);
   wait.resolve({ code: 0, stdout: JSON.stringify(raw) }); await pending;
   assert.ok(!state[`${PREFIX}.control`].busyUntil);
@@ -107,8 +108,9 @@ test("large account reports have bounded native descriptions and remain navigabl
   assert.equal(seen.size, 20);
 });
 
-test("pane headers build a catalog for their provider only", async () => {
-  const report = { ...data, providers: [...data.providers, { id: "unrelated", get windows() { throw Error("unrelated catalog visited"); } }] };
+test("pane headers deserialize quota only when a collection changes it", async () => {
+  // shared() deserializes a copy on every call in Herdr; that copy is the cost being bounded.
+  const report = { ...data, providers: [...data.providers, { ...data.providers[0], id: "unrelated", key: "unrelated" }] };
   const host = await createHost({ mode: "header", data: report, runtime: { pane: "p" }, paneList: [{ pane: "p", program: { key: "codex", agent: true } }] });
   assert.match(flatten(host.tree()), /60%/);
   for (let i = 0; i < 100; i++) host.tree();
@@ -179,14 +181,15 @@ test("supervisor bounds output and never forwards stderr or partial failure outp
   const partial = await runBounded(process.execPath, ["-e", "console.log('{}'); console.error('SECRET'); process.exitCode=1"], { grace: 10 });
   assert.deepEqual(partial, { code: 1, stdout: "{}\n" });
 });
-test("supervisor reaps inherited-pipe descendants after their parent exits", { skip: process.platform === "win32" }, async () => {
+// F2: the parent's own exit is the result; a helper holding stdout no longer turns it into a timeout.
+test("supervisor returns a finished read and reaps inherited-pipe descendants", { skip: process.platform === "win32" }, async () => {
   const dir = await mkdtemp(join(tmpdir(), "quota-child-")), pidFile = join(dir, "pid");
   try {
     const child = `require('node:fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid)); process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)`;
-    const script = `const {spawn}=require('node:child_process'); spawn(process.execPath,['-e',${JSON.stringify(child)}],{stdio:['ignore',1,2]}).unref();`;
+    const script = `const {spawn}=require('node:child_process'); console.log('{}'); spawn(process.execPath,['-e',${JSON.stringify(child)}],{stdio:['ignore',1,2]}).unref();`;
     const start = performance.now();
-    const result = await runBounded(process.execPath, ["-e", script], { timeout: 500, grace: 25 });
-    assert.equal(result.code, 124);
+    const result = await runBounded(process.execPath, ["-e", script], { timeout: 2000, grace: 25 });
+    assert.deepEqual(result, { code: 0, stdout: "{}\n" });
     assert.ok(performance.now() - start < 3000);
     const pid = Number(await readFile(pidFile, "utf8"));
     assert.ok(Number.isInteger(pid) && pid > 0);
