@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseReport, options, windowState, catalog, redlines, pace, elapsed, resetLabel } from "../mods/agent-quota/core.js";
+import { parseReport, options, windowState, catalog, redlines, pace, elapsed, resetLabel, shortLabel, visibleWindows, reading, QuotaError } from "../mods/agent-quota/core.js";
 import { collect, canCollect } from "../mods/agent-quota/collector.js";
 import { integrateLayout } from "../scripts/layout.mjs";
 
@@ -132,4 +132,28 @@ test("layout integration keeps the existing status and is idempotent", () => {
 test("optional headers preserve custom headers by refusing replacement", () => {
   const source = { type: "column", children: [{ id: "status", type: "block", content: { mod: "workspace-status" } }, { type: "block", content: { tab: "active", pane: { header: { content: { mod: "custom" } } } } }] };
   assert.throws(() => integrateLayout(source, { headers: true }), /Custom pane header/);
+});
+test("display choices are validated and window choices must be booleans", () => {
+  const o = options({}, { strip: "neon", dash: "gauges", metric: "left", palette: 3, windows: { a: false, b: "yes", c: true } });
+  assert.equal(o.strip, "meter"); assert.equal(o.dash, "gauges"); assert.equal(o.metric, "left"); assert.equal(o.palette, "terminal");
+  assert.deepEqual(o.windows, { a: false, c: true });
+});
+test("short labels stay unique within a provider", () => {
+  const monthly = ["chat", "completions"].map(label => ({ kind: "monthly", label }));
+  assert.deepEqual(monthly.map(w => shortLabel(w, monthly)), ["Chat", "Completions"]);
+  const pair = [{ kind: "session", windowSeconds: 18000, label: "session" }, { kind: "weekly", label: "week" }];
+  assert.deepEqual(pair.map(w => shortLabel(w, pair)), ["5h", "Week"]);
+});
+test("an explicit limit choice overrides its kind default", () => {
+  const p = parse(report()).providers[0], key = p.windows[0].key;
+  assert.equal(visibleWindows(p, options({}, { kinds: { session: false } })).length, 0);
+  assert.equal(visibleWindows(p, options({}, { kinds: { session: false }, windows: { [key]: true } })).length, 1);
+});
+test("left shows headroom from the same measurement", () => {
+  const w = parse(report()).providers[0].windows[0];
+  assert.equal(reading(w, options()), 70); assert.equal(reading(w, options({}, { metric: "left" })), 30);
+});
+test("collector and parser failures are typed as this mod's own messages", async () => {
+  assert.throws(() => parseReport("nope", now), QuotaError);
+  await assert.rejects(collect(async () => ({ code: 2, stdout: "" }), {}, now), QuotaError);
 });

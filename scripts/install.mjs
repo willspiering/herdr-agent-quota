@@ -37,11 +37,11 @@ try {
     process.exit(0);
   }
   if (!args.has("--no-deps")) {
-    console.log("Installing quota-axi 0.1.69 locally (npm registry, package scripts disabled)…");
-    cli(process.platform === "win32" ? "npm.cmd" : "npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], 180000);
+    console.log("Installing quota-axi 0.1.69 from the lockfile (integrity-checked, package scripts disabled)…");
+    cli(process.platform === "win32" ? "npm.cmd" : "npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], 180000);
   }
   const collector = join(root, "node_modules/quota-axi/dist/bin/quota-axi.js");
-  if (!await exists(collector)) throw new Error("quota-axi is missing. Run npm install --ignore-scripts first.");
+  if (!await exists(collector)) throw new Error("quota-axi is missing. Run npm ci --ignore-scripts first.");
   console.log("Checking the native mod…");
   cli("herdr-app", ["check", join(root, "mods", MOD)]);
   await mkdir(installedPath, { recursive: true });

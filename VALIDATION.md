@@ -20,15 +20,29 @@ The status snapshot was produced by the user's installer; live UI inspection
 used the desktop computer-use tool. This is a dark-theme spot check, not a
 full native release verification.
 
+## Redesign session, 2026-10-30
+
+Evidence from `herdr-app shot` captures of the live app (Herdr 0.1.10, dark
+theme), with the build installed into the existing local trial:
+
+- The `interrupted` banner reproduced on 3 of 3 dashboard openings with no
+  collection due. Removing the `cx.notify()` from `on_size_change` cleared it
+  on 2 of 2; the shipped fix (repaint from a spawned task, width-thresholded)
+  was clean on 3 of 3, including one opening during a live collection.
+- Painted meter rows, segmented gauges, the Blocks strip, Settings (preview,
+  switches, segmented controls, limit chips) and Copilot's three distinct
+  monthly limit names were inspected natively. Gauges, Blocks and the providers
+  section were captured with a temporary build forcing those options; the
+  installed copy was restored to the repository source afterward.
+- Claude now reports `fresh` quota; the earlier `auth_required` state is gone.
+- `herdr-app check` passes for the repository and installed copies, and
+  `herdr-app status` reports no errors. `npm test`: 43 passing.
+- Not done: TypeScript checking against the Herdr declarations (no compiler
+  installed), clicking controls natively (no pointer automation was used),
+  light theme, zoom, narrow widths and restart persistence.
+
 ## Open issues
 
-- On the first dashboard opening, Herdr showed a re-render failure with the
-  detail `interrupted`, retaining the last successful view. Closing and reopening
-  produced a working dashboard; Configure and Overview then worked. Cause is
-  unconfirmed. Do not describe this as fixed or assume a performance cause.
-- The collector reports `auth_required` for Claude, with no quota windows.
-  Herdr detects Claude as installed; running sessions do not prove quota access.
-  Its authentication/secure-store setup needs a separate check.
 - Remote account quota and absolute token-count telemetry are not implemented.
 
 ## Remaining native checks

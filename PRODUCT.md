@@ -42,7 +42,7 @@ credentials with a provider account.
 ## Brand Commitments
 
 Named Herdr Agent Quota. Closely follow Lakris2407/herdr-quota's status-bar
-workflow and configuration, with graphical speedometer-like full views.
+workflow and configuration, with terminal-styled meters and optional gauges.
 
 ## Evidence on Hand
 

@@ -1,6 +1,29 @@
 # Changelog
 
-## Unreleased fixes
+## Unreleased
+
+- Terminal-styled redesign: monospace type, `──` section rules, and health
+  colors from the theme's ANSI green/yellow/red (Classic palette optional).
+- Meters and gauges are painted natively, one path per color, replacing 41+
+  elements per gauge. Dashboard layout: dense meter rows (default) or solid
+  segmented 240° gauges.
+- Status strip styles: Meter, Blocks or Numbers; show usage as Used or Left.
+- Settings rebuilt with a live strip preview, switches, segmented choices and
+  per-limit chips. An individual limit choice now overrides its kind default.
+- Overview hides providers with nothing to read unless opted in; sign-in-needed
+  providers stay. Session rows are whole click targets; Escape closes the window.
+- `agent-quota.settings` opens the window on Settings (bindable in keys.json).
+- Fix: re-renders requested from `on_size_change` ran inside layout and were
+  interrupted ("This view could not be re-rendered · interrupted"). Repaints
+  now come from a task, only when the width changes the layout.
+- Fix: limits sharing a kind (Copilot's chat/completions/premium) no longer
+  all read "Month".
+- Unchanged shared values are not rewritten; each write re-renders every mod
+  in the window. Pane headers poll every 60 s instead of 15 s.
+- Only this mod's own error messages are stored or shown; other exceptions are
+  replaced with a generic message. Setup installs with `npm ci`.
+
+## Earlier unreleased fixes
 
 - Create the status-strip focus handle during initialization. Dashboard and
   pane controls use native buttons with retained focus, so rendering never

@@ -1,8 +1,9 @@
 # Herdr Agent Quota
 
 A [Herdr](https://herdr.dev) mod for monitoring agent quotas across your spaces.
-A compact status strip opens a graphical dashboard with usage gauges, reset
-countdowns, and a configurable redline that starts at 70% used.
+A terminal-styled status strip opens a dashboard of segmented usage meters or
+gauges, reset countdowns, pace and live agent activity, with a configurable
+redline that starts at 70% used. Colors follow your terminal theme.
 
 ## Setup
 
@@ -16,8 +17,14 @@ npm run setup
 
 For quota details in pane headers, use `npm run setup:headers` instead.
 Setup installs the collector and adds the mod to a cloned Herdr layout.
-Click the quota strip to open the dashboard and configure visible providers
-and limits. Quota availability depends on each provider and your sign-in.
+Click the quota strip to open the dashboard. Settings, in the same window,
+chooses the strip style (Meter, Blocks, Numbers), Used or Left, the dashboard
+layout, colors, redline, and which providers and limits show. Changes apply
+immediately with a live preview. Quota availability depends on each provider
+and your sign-in.
+
+Optional keys in `keys.json`: `"agent-quota.open"`, `"agent-quota.settings"`
+and `"agent-quota.refresh"`.
 
 For Claude on macOS, you may need a one-time Keychain grant:
 

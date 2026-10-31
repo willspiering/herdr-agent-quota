@@ -6,7 +6,14 @@ export const DEFAULTS = {
   hidden: [], kinds: { session: true, weekly: true, monthly: true, model: false, credits: true, unknown: true },
   windows: {}, signedOut: false, names: true, activeFirst: true,
   favorites: ["codex", "claude", "grok"], redline: 70,
+  strip: "meter", dash: "bars", metric: "used", palette: "terminal",
 };
+export const CHOICES = {
+  strip: ["meter", "blocks", "numbers"], dash: ["bars", "gauges"],
+  metric: ["used", "left"], palette: ["terminal", "classic"],
+};
+// Messages written by this mod. Anything else is replaced before it is stored or shown.
+export class QuotaError extends Error {}
 const text = (v, fallback = "", max = 120) => typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, max) : fallback;
 const number = v => typeof v === "number" && Number.isFinite(v) ? v : null;
 const percent = v => number(v) === null || v < 0 ? null : Math.min(100, v);
@@ -21,15 +28,16 @@ export function options(start = {}, saved = {}) {
     hidden: Array.isArray(o.hidden) ? o.hidden.filter(x => typeof x === "string") : [],
     favorites: Array.isArray(o.favorites) ? o.favorites.filter(x => typeof x === "string") : DEFAULTS.favorites,
     kinds: { ...DEFAULTS.kinds, ...start.kinds, ...saved.kinds },
-    windows: { ...start.windows, ...saved.windows },
+    windows: Object.fromEntries(Object.entries({ ...start.windows, ...saved.windows }).filter(([, v]) => typeof v === "boolean")),
     redline: [60, 70, 80, 90].includes(o.redline) ? o.redline : 70,
+    ...Object.fromEntries(Object.entries(CHOICES).map(([k, list]) => [k, list.includes(o[k]) ? o[k] : DEFAULTS[k]])),
   };
 }
 
 // Parse a complete JSON object, even after shell banners or ANSI status lines.
 // Never echo a malformed report or a subprocess error: it could contain credentials.
 export function parseReport(stdout, now = Date.now()) {
-  if (typeof stdout !== "string" || stdout.length > 8 * 1024 * 1024) throw new Error("Quota report is missing or too large.");
+  if (typeof stdout !== "string" || stdout.length > 8 * 1024 * 1024) throw new QuotaError("Quota report is missing or too large.");
   let report;
   let attempts = 0;
   for (let start = stdout.indexOf("{"); start >= 0 && attempts++ < 32; start = stdout.indexOf("{", start + 1)) {
@@ -46,8 +54,8 @@ export function parseReport(stdout, now = Date.now()) {
     }
     if (report) break;
   }
-  if (!report) throw new Error("Collector returned an unreadable quota report.");
-  if (![3, 4, 5].includes(report.schemaVersion)) throw new Error("Unsupported quota schema. This version supports schemas 3–5.");
+  if (!report) throw new QuotaError("Collector returned an unreadable quota report.");
+  if (![3, 4, 5].includes(report.schemaVersion)) throw new QuotaError("Unsupported quota schema. This version supports schemas 3–5.");
   const generated = stamp(report.generatedAt);
   const at = generated !== null && generated <= now + 60000 ? Math.min(generated, now) : now;
   const lanes = new Set();
@@ -58,13 +66,13 @@ export function parseReport(stdout, now = Date.now()) {
     if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id)) continue;
     const account = text(p.accountKey, "", 160) || (Array.isArray(p.accountKeys) ? p.accountKeys.map(x => text(x, "", 160)).filter(Boolean).sort().join("+") : "") || "default";
     const key = JSON.stringify([id, account]);
-    if (lanes.has(key)) throw new Error("Collector returned duplicate account lanes.");
+    if (lanes.has(key)) throw new QuotaError("Collector returned duplicate account lanes.");
     lanes.add(key);
     const untrusted = new Set(Array.isArray(p.untrustedWindowIds) ? p.untrustedWindowIds : []);
     const windowIds = new Set();
     const windows = (Array.isArray(p.windows) ? p.windows : []).slice(0, 100).filter(Boolean).map(w => {
       const wid = text(w.id) || JSON.stringify([text(w.kind, "unknown"), text(w.label, "Unnamed limit")]);
-      if (windowIds.has(wid)) throw new Error("Collector returned duplicate limit identities.");
+      if (windowIds.has(wid)) throw new QuotaError("Collector returned duplicate limit identities.");
       windowIds.add(wid);
       const shareOf = text(w.shareOf) || null;
       const remaining = percent(w.percentRemaining);
@@ -120,11 +128,18 @@ export function resetLabel(w, now) {
   const mins = Math.ceil((w.resetsAt - now) / 60000), h = Math.floor(mins / 60);
   return `Resets in ${h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : h ? `${h}h ${mins % 60}m` : `${mins}m`}`;
 }
-export function shortLabel(w) {
-  if (w.kind === "session") return w.windowSeconds ? `${Math.round(w.windowSeconds / 360) / 10}h` : w.label || "Session";
-  return ({ weekly: "Week", monthly: "Month" })[w.kind] ?? w.label;
+const brief = w => w.kind === "session" && w.windowSeconds ? `${Math.round(w.windowSeconds / 360) / 10}h` : ({ weekly: "Week", monthly: "Month" })[w.kind] ?? w.label;
+// Short names stay distinct within a provider: three monthly pools keep their own labels.
+export function shortLabel(w, siblings = []) {
+  const short = brief(w);
+  if (!siblings.some(x => x !== w && brief(x) === short)) return short;
+  return w.label ? w.label[0].toUpperCase() + w.label.slice(1) : short;
 }
-export function visibleWindows(p, o) { return p.windows.filter(w => o.kinds[w.kind] !== false && o.windows[w.key] !== false); }
+// An explicit per-limit choice wins over its kind's default.
+export function shows(w, o) { return o.windows[w.key] ?? o.kinds[w.kind] !== false; }
+export function visibleWindows(p, o) { return p.windows.filter(w => shows(w, o)); }
+// The figure shown: used, or the remaining headroom. Health always follows usage.
+export function reading(w, o) { return o.metric === "left" ? 100 - w.percentUsed : w.percentUsed; }
 export function activeProvider(a) { return providerId(a.program?.key || a.app); }
 export function remoteAgent(a, spaces) { return a.address?.includes("/") || Boolean(spaces.find(s => s.id === a.space)?.machine); }
 

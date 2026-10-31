@@ -1,27 +1,32 @@
 # Herdr Agent Quota
 
-A quiet quota readout at the right end of Herdr's status bar opens a graphical
-view of account limits and agent activity. Each limit has a speedometer-like
-gauge and a visible red zone from 70% used. Codex, Claude and Grok lead when
+A quiet, terminal-styled quota readout at the right end of Herdr's status bar
+opens a view of account limits and agent activity. Each limit is a segmented
+meter (or optional 240° gauge) with a dim red zone from 70% used. Codex, Claude and Grok lead when
 no active agent takes priority. A publication screenshot is pending broader
 native validation; no synthetic image is represented as a live capture.
 
 ## What you see
 
 Keep Herdr's original status readout at left and put the quota strip beside
-it in the same 28px row. Use the current Herdr chrome, popover, foreground,
-muted and border tokens. The strip has 12px horizontal padding, 12px provider
-gaps, 12px icons and 28×5px quota tracks. Show fewer providers when space is
-tight, with an overflow count opening the full view.
+it in the same 28px row. All surfaces use the terminal font
+(`settings().font_family`, else JetBrains Mono) and Herdr's chrome, popover,
+foreground, muted and border tokens. The strip has 12px padding, 14px gaps and
+12px icons; each limit is a 10px label, then a 34×8 meter of 3px cells, an
+8-cell `▕███░░░░░▏` block bar, or nothing, then its percentage. Show fewer
+providers when space is tight, with a `+N` overflow count.
 
-The full view is a named 850×660 native floating window. Its header has a
-23px title, global activity counts, update age, Refresh and Close. Overview
-and Configure sit beneath it. A scrolling body contains one horizontal
-section per provider account, a 17px provider name, plan and activity count,
-wrapping 176px-wide gauges, then sessions and navigation controls. Each
-gauge uses 41 native marks on a 240° arc, a 30px percentage, its actual limit
-label, reset countdown and pace. The footer explains account sharing,
-remote activity and unavailable absolute token counts.
+The full view is a named 850×660 native window: a 17px title with agent,
+space and update counts, `↻ Refresh` (a braille spinner while collecting) and
+`✕`; an Overview/Settings segmented control and `redline N%`. Each provider
+section is a 16px glyph, 14px name, `[plan]`, a 1px rule and its activity
+(`● 2 working`, `▲ 1 needs you`). Meter rows: 72px label, a painted meter of
+5×10 cells with 2px gaps, 76px value with `used`/`left`, 130px reset, 100px
+pace. Gauges: 30 segments on a 240° arc, 140px, 24px value. Sessions are whole
+rows: mark, status, `space / tab`, `on <machine>` for remote, `go to →`.
+Settings: `── status bar` (live strip preview, Style, Show, names switch),
+`── dashboard` (Meters/Gauges, Terminal/Classic), `── redline` (60–90%),
+`── providers` (switches, per-limit chips), `── about this data`.
 
 ## How it behaves
 
@@ -46,8 +51,9 @@ dashboard or optional header using `props().mode`. Use Herdr's `knownAgents`,
 quota schema 3–5, account lanes, visibility, activity ranking and freshness.
 `collector.js` executes quota-axi. A shared 45-second lease prevents duplicate
 reads across copies. Normal quota reads are every 120 seconds, discovery
-every 300 seconds, and failures back off to 600 seconds. Use native static
-geometry; no animation polling.
+every 300 seconds, and failures back off to 600 seconds. Paint meters
+with `window.paint_path` and `PathBuilder.fill().add_polygon`, one path per
+color. Use native motion (`frames`, `transition`); no animation polling.
 
 The installer clones through `layout.clone` to retain click state, changes
 only its clone, preserves the existing status mod and refuses unfamiliar
@@ -55,6 +61,12 @@ headers or name collisions. Runtime paths are generated separately, never
 hardcoded to a particular user's home.
 
 ## Watch out
+
+`on_size_change` runs during layout; a `cx.notify()` there re-renders inside
+layout and Herdr interrupts it (`could not be re-rendered · interrupted`).
+Repaint from `cx.spawn`. `setShared` re-renders every mod, so skip unchanged
+writes. Short limit names must stay unique per provider (Copilot has three
+monthly pools). An explicit per-limit choice overrides its kind default.
 
 Quota is per account, never per pane. Keep multiple accounts separate and
 do not infer a terminal's account. Remote activity is unlinked to local quota.
@@ -75,7 +87,7 @@ are different capabilities.
 - `herdr-app check mods/agent-quota` passes on a normal desktop session.
 - Installed percentages match local quota-axi readings.
 - The native dashboard renders correctly in both themes and at increased zoom.
-- Window dragging, keyboard focus, Configure and Go to agent work in Herdr.
+- Window dragging, keyboard focus, Escape, Settings and Go to agent work in Herdr.
 - Restarting preserves settings; multiple surfaces still share one collector.
 - Remote activity is explicitly unlinked and expired data never looks fresh.
 - A real `preview.png` from Herdr is available before sharing publicly.

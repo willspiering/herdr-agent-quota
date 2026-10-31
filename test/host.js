@@ -23,11 +23,21 @@ export const constructors = {
   View: class {}, div: () => new Element(), h_flex: () => new Element("row"), v_flex: () => new Element("column"),
   svg: value => new Element("svg", value), image: value => new Element("image", value),
   Button: { new: id => new Element("button").id(id) },
+  PathBuilder: { fill: () => path(), stroke: () => path() },
+  Background: { solid: color => ({ color, opacity: () => ({ color }) }) },
+  // Painted paths become elements that record their polygon count and fill.
+  window: { paint_path: (built, fill) => new Element("path", { polygons: built.polygons, fill: fill?.color ?? fill }) },
 };
+function path() {
+  const polygons = [];
+  const builder = { add_polygon(points) { polygons.push(points); return builder; }, build: () => ({ polygons }) };
+  return builder;
+}
 export const palette = {
   foreground: "#e5e7ec", muted: "#abb0bc", dim: "#888e9b", border: "#363940", input: "#687184", accent: "#8bb3e6",
   popover: "#202228", surface: "#25282f", chrome: "#191b20", background: "#202228", hover: "#34373f", selected: "#303946",
   working: "#e1bc75", blocked: "#f48e83", done: "#80c9ae", idle: "#abb0bc",
+  ansi1: "#e06c75", ansi2: "#98c379", ansi3: "#e5c07b",
 };
 export function walk(element, visit) {
   if (!(element instanceof Element)) return;
@@ -42,7 +52,7 @@ export async function createHost({ mode = "dashboard", data = null, live = [], i
   const source = await readFile(new URL("../mods/agent-quota/main.js", import.meta.url), "utf8");
   const state = { [`${core.PREFIX}.data`]: data, [`${core.PREFIX}.discovered`]: installed };
   const properties = { mode, ...runtime };
-  const tasks = [], timers = [], overlays = [], commands = [];
+  const tasks = [], timers = [], overlays = [], commands = [], writes = [];
   let phase = "init";
   const focus = { allocations: 0 };
   const cx = {
@@ -56,7 +66,7 @@ export async function createHost({ mode = "dashboard", data = null, live = [], i
   const api = {
     exec: runner ?? (async () => { throw Error("Not installed"); }), appHome: () => "/preview", readTextFile: async () => null,
     knownAgents: async () => installed, agents: () => live, spaces: () => spaceList, panes: () => paneList,
-    theme: () => palette, settings: () => ({ dark: true }), shared: name => state[name], setShared: (name, value) => { state[name] = value; },
+    theme: () => palette, settings: () => ({ dark: true, font_family: "JetBrains Mono" }), shared: name => state[name], setShared: (name, value) => { writes.push(name); state[name] = value; },
     props: () => properties, openOverlay: spec => { overlays.push(spec); return "overlay"; }, closeOverlay: id => commands.push(["close", id]),
     nextCommand: () => new Promise(() => {}), run: (name, args) => commands.push([name, args]),
   };
@@ -64,7 +74,7 @@ export async function createHost({ mode = "dashboard", data = null, live = [], i
   const code = source.replace(/import[\s\S]*?from\s+"[^";]+";/g, "").replace("export function colors", "function colors").replace("export default class AgentQuota", "class AgentQuota");
   const AgentQuota = new Function(...Object.keys(deps), `${code}\nreturn AgentQuota;`)(...Object.values(deps));
   const view = new AgentQuota(); view.init(properties, cx);
-  return { view, cx, state, tasks, timers, overlays, commands, properties, focus, tree() {
+  return { view, cx, state, tasks, timers, overlays, commands, writes, properties, focus, tree() {
     phase = "render";
     try { return view.render(cx); } finally { phase = "event"; }
   } };

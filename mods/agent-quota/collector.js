@@ -1,4 +1,4 @@
-import { parseReport } from "./core.js";
+import { parseReport, QuotaError } from "./core.js";
 
 export const ARGS = ["--json", "--full", "--max-age", "90s", "--no-credential-refresh"];
 
@@ -19,9 +19,9 @@ export async function collect(exec, runtime = {}, now = Date.now()) {
       return parseReport(result.stdout, now);
     }
     // A found executable failing is not a reason to repeat all provider calls.
-    if (![126, 127].includes(result.code)) throw new Error("Collector failed. Check quota-axi in a terminal, then retry.");
+    if (![126, 127].includes(result.code)) throw new QuotaError("Collector failed. Check quota-axi in a terminal, then retry.");
   }
-  throw new Error("Quota collector not found. Run npm run setup in the Herdr Agent Quota project.");
+  throw new QuotaError("Quota collector not found. Run npm run setup in the Herdr Agent Quota project.");
 }
 
 export function canCollect(control, now, force = false) {
