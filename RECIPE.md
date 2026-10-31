@@ -62,6 +62,20 @@ hourly, on Refresh and after a failure. Pane headers only display. Paint meters
 with `window.paint_path`: each run of same-colored cells is one
 `PathBuilder.stroke(h)` line (or `arc_to`) with `dash_array([cell, gap])`. Use native motion (`frames`, `transition`); no animation polling.
 
+Collection always runs through `scripts/collect.mjs`, whose supervisor limits
+the quota subprocess to 30 seconds and 1 MiB stdout and reaps its process group
+on macOS/Linux. Raw audit JSON is reduced outside Herdr. Setup records the
+absolute Node, supervisor and quota-axi paths. A 45-second shared claim prevents
+competing copies/builds from reading concurrently; retired and late results are
+discarded. Discovery runs separately, hourly or on manual refresh (at most once
+a minute). Headers cache their provider's lanes until collection revision changes.
+Activity is grouped once per provider using a space map, independent of account count.
+
+Ordinary scroll areas eagerly build their offscreen content. Bound the dashboard
+and Settings to four provider/account sections per page, eight limit instruments
+or chips per account, and eight agent rows per account. Previous/Next controls
+keep every item reachable. Keep redline summary text bounded, with an overflow count.
+
 The installer clones through `layout.clone` to retain click state, changes
 only its clone, preserves the existing status mod and refuses unfamiliar
 headers or name collisions. Runtime paths are generated separately, never
@@ -73,10 +87,12 @@ Every path command is a separate call into the host. A polygon per cell (five
 calls) over a full dashboard ran past Herdr's render budget and showed
 `could not be re-rendered · interrupted`; keep calls independent of cell count.
 
-Test with as few hot reloads as possible. On Herdr 0.1.10 each reload leaves
-QuickJS JIT feedback behind; after ~20 reloads its maintenance pass dominated
-every render and pinned the main thread at 100%. Measure performance only after
-a window restart. Every `for (;;)` in a task must use `cx` each turn.
+Test with as few hot reloads as possible. After ~20 reloads on Herdr 0.1.10,
+samples showed QuickJS JIT maintenance dominating the main thread. This suggests
+a runtime interaction; it does not establish a sole cause or rule out mod defects.
+Measure on a fresh window and compare against a matched baseline. Every `for (;;)`
+in a task must use `cx` each turn; `cx.phase()` checks lifecycle without a redraw.
+See `PERFORMANCE_REVIEW.md` for the review, regression tests and native acceptance gates.
 
 `on_size_change` runs during layout; a `cx.notify()` there re-renders inside
 layout and Herdr interrupts it (`could not be re-rendered · interrupted`).
@@ -90,9 +106,9 @@ Unknown percentages stay unknown. A past reset suppresses the old value;
 stale values are historical and never count toward redline alerts. Used-share
 windows are not independent quota pools. Provider durations and limits vary.
 
-The Dock can have a different PATH. Try a packaged absolute collector, then
-PATH, then a fixed login-shell command. Do not insert report text into shell
-commands. Do not display subprocess stderr or persist raw reports. Collector
+The Dock can have a different PATH. Use the setup-generated absolute paths;
+if unavailable, show setup instructions. Unbounded PATH/login-shell fallbacks
+defeat the supervisor and must not return. Do not display subprocess stderr or persist raw reports. Collector
 auth setup may need a one-time secure-store grant; do not trigger that from
 background polling. No inference requests. CLI execution and quota availability
 are different capabilities.

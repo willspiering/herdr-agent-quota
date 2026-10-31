@@ -10,6 +10,7 @@ const provider = (extra = {}) => ({ provider: "codex", state: { status: "fresh",
 const report = (providers = [provider()], schemaVersion = 5) => ({ schemaVersion, generatedAt: new Date(now).toISOString(), providers });
 const parse = r => parseReport(JSON.stringify(r), now);
 const opts = options();
+const runtime = { node: "/node", runner: "/runner", collector: "/collector" };
 
 test("schema 5 remaining becomes used without reversing quota", () => {
   const p = parse(report()).providers[0];
@@ -105,25 +106,24 @@ test("saved choices override props without dropping other defaults", () => {
 });
 test("collector accepts exit 1 reports and does not repeat provider calls", async () => {
   let calls = 0;
-  const result = await collect(async () => { calls++; return { code: 1, stdout: JSON.stringify(report()), stderr: "SECRET" }; }, {}, now);
+  const result = await collect(async () => { calls++; return { code: 1, stdout: JSON.stringify(report()), stderr: "SECRET" }; }, runtime, now);
   assert.equal(result.report.providers.length, 1); assert.equal(calls, 1); assert.equal(result.swept, true);
 });
-test("collector PATH recovery uses only constant shell text", async () => {
+test("an installation without the supervisor cannot fall back to an unbounded shell", async () => {
   const calls = [];
-  const data = await collect(async (cmd, args) => { calls.push([cmd, args]); if (cmd === "quota-axi") throw Error("SECRET"); return { code: 0, stdout: JSON.stringify(report()) }; }, {}, now);
-  assert.equal(data.report.providers.length, 1); assert.equal(calls.length, 2); assert.equal(calls[1][0], "sh");
-  assert.ok(calls[1][1][1].includes("--no-credential-refresh"));
+  await assert.rejects(collect(async (...args) => { calls.push(args); }, {}, now), /needs setup/);
+  await assert.rejects(collect(async () => { calls.push("once"); throw Error("SECRET"); }, runtime, now), /could not start/);
+  assert.deepEqual(calls, ["once"]);
 });
-test("targeted reads pass ids as one argv element; the shell fallback never sees them", async () => {
+test("targeted reads use supervised argv and invalid provider ids cause a sweep", async () => {
   const calls = [];
-  const runner = async (cmd, args) => { calls.push([cmd, args]); if (cmd !== "sh") throw Error("missing"); return { code: 0, stdout: JSON.stringify(report()) }; };
-  const result = await collect(runner, { node: "/n", collector: "/c" }, now, ["claude", "codex"]);
-  assert.deepEqual(calls[0][1].slice(-2), ["--provider", "claude,codex"]);
-  assert.deepEqual(calls[1][1].slice(-2), ["--provider", "claude,codex"]);
-  assert.doesNotMatch(calls[2][1][1], /claude|codex/);
-  assert.equal(result.swept, true); // the fallback read everything
-  const plain = []; await collect(async (cmd, args) => { plain.push(args); return { code: 0, stdout: JSON.stringify(report()) }; }, {}, now, ["bad id;rm"]);
-  assert.ok(!plain[0].includes("--provider")); // invalid ids fall back to a full read
+  const runner = async (cmd, args) => { calls.push([cmd, args]); return { code: 0, stdout: JSON.stringify(report()) }; };
+  const result = await collect(runner, runtime, now, ["claude", "codex"]);
+  assert.deepEqual(calls[0], ["/node", ["/runner", "/collector", String(now + 35000), "claude", "codex"]]);
+  assert.equal(result.swept, false);
+  await collect(runner, runtime, now, ["bad id;rm"]);
+  assert.deepEqual(calls[1][1], ["/runner", "/collector", String(now + 35000)]);
+  for (const code of [124, 125, 126]) await assert.rejects(collect(async () => ({ code, stdout: "SECRET" }), runtime, now), QuotaError);
 });
 test("the scheduler reads after a turn, never closer than a minute", () => {
   const control = { attempt: now - 30000 };

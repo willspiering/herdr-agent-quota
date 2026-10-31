@@ -37,7 +37,7 @@ test("gauge layout draws a segmented arc", async () => {
   assert.ok(drawn.every(p => p.commands.map(c => c[0]).join() === "move_to,arc_to,dash_array"));
 });
 // The regression behind "could not be re-rendered · interrupted": host calls must not grow with cells.
-test("a full dashboard stays within a small, cell-independent host-call budget", async () => {
+test("a full dashboard stays within a small, cell-independent path-command budget", async () => {
   const providers = ["codex", "claude", "gemini", "copilot", "cursor", "grok"].map((provider, k) => ({ provider, state: { status: "fresh" },
     windows: ["session", "weekly", "monthly"].map((kind, i) => ({ id: kind, label: kind, kind, percentRemaining: 95 - k * 12 - i * 9,
       windowSeconds: 604800, resetsAt: new Date(now + 3600000 * (i + 1)).toISOString() })) }));
@@ -46,7 +46,8 @@ test("a full dashboard stays within a small, cell-independent host-call budget",
     const host = await createHost({ data: big });
     host.state[`${PREFIX}.options`] = { dash, windows: {} };
     const drawn = paths(host.tree());
-    // 18 limits, each at most three runs (3 calls) plus the time tick (2 calls).
+    // These count path commands, excluding path construction, painting and builder setters.
+    // 18 limits, each at most three runs (3 commands) plus the time tick (2 commands).
     assert.ok(drawn.length > 0, dash);
     assert.ok(calls(drawn) <= 18 * 11, `${dash}: ${calls(drawn)} host calls`);
   }
@@ -118,12 +119,12 @@ test("missing data renders an actionable empty state without a percentage", asyn
 });
 test("unexpected exceptions are never stored verbatim", async () => {
   const host = await createHost({ data, runner: async () => { throw new TypeError("token=SECRET"); } });
-  host.view.runtime = {};
-  // Every attempt rejects, so collect reports its own not-found message.
+  host.view.runtime = { node: "/node", runner: "/runner", collector: "/collector" };
   host.view.tick(host.cx);
   await host.tasks.at(-1)(host.cx);
-  assert.match(host.state[`${PREFIX}.error`], /collector not found/);
+  assert.match(host.state[`${PREFIX}.error`], /could not start/);
   const broken = await createHost({ data, runner: async () => ({ code: 0, get stdout() { throw new TypeError("SECRET"); } }) });
+  broken.view.runtime = host.view.runtime;
   broken.view.tick(broken.cx);
   await broken.tasks.at(-1)(broken.cx);
   assert.doesNotMatch(broken.state[`${PREFIX}.error`], /SECRET/);
@@ -157,8 +158,8 @@ test("the strip checks every 10 s and the dashboard only repaints its clock", as
 async function reader(mode, live, extra = {}) {
   const runs = [];
   const runner = async (cmd, args) => { runs.push(args); return { code: 0, stdout: JSON.stringify({ schemaVersion: 5, generatedAt: new Date().toISOString(), providers: [{ provider: "codex", state: { status: "fresh" }, windows: [] }] }) }; };
-  const host = await createHost({ mode, data, live, runner, ...extra });
-  host.view.runtime = { node: "/node", collector: "/quota-axi" };
+  const host = await createHost({ mode, data, live, runner, runtimeFile: { node: "/node", collector: "/quota-axi", runner: "/runner" }, ...extra });
+  host.view.runtime = { node: "/node", collector: "/quota-axi", runner: "/runner" };
   return { host, runs, settle: async () => { while (host.tasks.length > (mode === "strip" ? 2 : 1)) await host.tasks.splice(-1)[0](host.cx); } };
 }
 test("an agent finishing its turn triggers a targeted read once the gap allows", async () => {
@@ -173,7 +174,9 @@ test("an agent finishing its turn triggers a targeted read once the gap allows",
   host.state[`${PREFIX}.control`] = { attempt: Date.now() - 61000, sweptAt: Date.now() };
   host.timers[0].fn(host.cx); await settle();
   assert.equal(runs.length, 1);
-  assert.deepEqual(runs[0].slice(-2), ["--provider", "codex"]);
+  assert.deepEqual(runs[0].slice(0, 2), ["/runner", "/quota-axi"]);
+  assert.ok(Number(runs[0][2]) > Date.now());
+  assert.equal(runs[0][3], "codex");
   assert.equal(host.state[`${PREFIX}.control`].reason, "turn");
   host.timers[0].fn(host.cx); await settle();
   assert.equal(runs.length, 1); // served once, not again
@@ -189,7 +192,7 @@ test("opening the dashboard reads only data older than a minute", async () => {
   assert.equal(old.runs.length, 1);
   assert.equal(old.host.state[`${PREFIX}.control`].reason, "look");
 });
-test("a read in flight blocks a second one, and the guard expires", async () => {
+test("a read in flight blocks a second one through shared control", async () => {
   const { host, runs } = await reader("strip", []);
   host.state[`${PREFIX}.control`] = null;
   host.timers[0].fn(host.cx); host.timers[0].fn(host.cx);
@@ -214,7 +217,7 @@ test("every endless loop yields to Herdr through cx, and nothing uses browser ti
   for (const match of source.matchAll(/for \(;;\) \{/g)) {
     let depth = 0, i = match.index + match[0].length - 1;
     do { if (source[i] === "{") depth++; else if (source[i] === "}") depth--; i++; } while (depth);
-    assert.match(source.slice(match.index, i), /\bcx\.(notify|spawn)\(/, "a for (;;) body must use cx");
+    assert.match(source.slice(match.index, i), /\bcx\.(notify|spawn|phase)\(/, "a for (;;) body must use cx");
   }
   for (const m of source.matchAll(/timer\.every\((\d+)/g)) assert.ok(Number(m[1]) >= 10000, `timer at ${m[1]} ms`);
 });
@@ -268,13 +271,14 @@ test("each page keeps its own scroll position", async () => {
   assert.ok(find(host.tree(), "quota-scroll-configure"));
 });
 test("the command loop yields to Herdr and stops when commands end", async () => {
-  let calls = 0, notified = 0;
+  let calls = 0, checked = 0, notified = 0;
   const host = await createHost({ mode: "strip", data, nextCommand: async () => (++calls === 1 ? "open" : undefined) });
   host.cx.notify = () => { notified++; };
+  host.cx.phase = () => { checked++; return "task"; };
   await host.tasks[1](host.cx); // must return rather than spin
-  assert.equal(calls, 2); assert.equal(host.overlays.length, 1); assert.equal(notified, 2);
+  assert.equal(calls, 2); assert.equal(host.overlays.length, 1); assert.equal(checked, 2); assert.equal(notified, 0);
   // A retired copy's cx throws on use, which ends the loop even if commands keep coming.
   const retired = await createHost({ mode: "strip", data, nextCommand: async () => "noop" });
-  retired.cx.notify = () => { throw new Error("view released"); };
+  retired.cx.phase = () => { throw new Error("view released"); };
   await assert.rejects(retired.tasks[1](retired.cx), /released/);
 });

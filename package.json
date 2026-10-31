@@ -8,6 +8,7 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "check": "node scripts/check.mjs",
+    "benchmark": "node scripts/benchmark.mjs",
     "setup": "node scripts/install.mjs",
     "setup:headers": "node scripts/install.mjs --headers",
     "preview": "node scripts/preview.mjs"

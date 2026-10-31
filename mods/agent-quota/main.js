@@ -28,9 +28,11 @@ const PACE_NOTE = {
 const STATE_MARK = { working: "●", blocked: "▲", done: "✓", idle: "○" };
 const ICONS = { claude: "claude", codex: "codex", grok: "grok", cursor: "cursor", copilot: "copilot", kimi: "kimi" };
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-// One read at a time per runtime; quota-axi also merges simultaneous reads across processes.
-// A timestamp, not a flag: a task cancelled when its copy closes can't wedge later reads.
-let inFlight = 0;
+// Coordination is shared across copies/builds, not a module variable whose lifetime depends
+// on Herdr's module cache. The supervised process ends within 31 s; a 45 s claim can recover
+// after cancellation without overlapping a still-running collector.
+const CLAIM_MS = 45000;
+const PROVIDER_PAGE = 4, LIMIT_PAGE = 8, SESSION_PAGE = 8;
 const CLASSIC = { dark: ["#80c9ae", "#e1bc75", "#f48e83"], light: ["#226b50", "#79530c", "#ad302d"] };
 
 // Health follows the terminal's own ANSI green/yellow/red unless the classic palette is chosen.
@@ -40,11 +42,12 @@ export function colors(t, dark, palette = "terminal") {
   return { ...t, healthy, warning, redline };
 }
 const colorFor = (used, o, t) => used >= o.redline ? t.redline : used >= o.redline - 15 ? t.warning : t.healthy;
-const tint = (color, alpha) => /^#[0-9a-f]{6}$/i.test(color ?? "") ? `${color}${alpha}` : null;
+/** @returns {import("gpui-kit").Color | null} */
+const tint = (color, alpha) => /^#[0-9a-f]{6}$/i.test(color ?? "") ? /** @type {import("gpui-kit").Color} */ (`${color}${alpha}`) : null;
 const label = (s, size, color) => div().text_size(size).text_color(color).child(s);
 const rule = t => div().h(1).w_full().flex_none().bg(t.border);
 
-// Each run of same-colored cells is one dashed stroke: three host calls however many cells
+// Each run of same-colored cells is one dashed stroke: three path commands however many cells
 // it holds. A polygon per cell cost five calls each, and a dashboard full of them ran past
 // Herdr's render budget ("could not be re-rendered · interrupted").
 const ZONE = .35;
@@ -69,10 +72,12 @@ export default class AgentQuota extends View {
     this.pending = false;
     this.statuses = null;
     this.finishedAt = 0;
+    this.pages = {};
     // Pane headers, one per pane, only display. The strip schedules reads; the dashboard reads
     // when opened. The 10 s check is in-memory: it runs a read only when one is due.
     if (this.mode !== "header") cx.spawn(async cx => {
-      try { this.runtime = JSON.parse(await readTextFile(`${appHome()}/mods/agent-quota/runtime.json`) || "{}"); } catch { /* PATH fallback */ }
+      try { this.runtime = JSON.parse(await readTextFile(`${appHome()}/mods/agent-quota/runtime.json`) || "{}"); } catch { /* collection reports setup instructions */ }
+      cx.phase(); // End retired tasks before they start a subprocess or publish state.
       this.tick(cx, { looking: this.mode === "dashboard" });
     });
     if (this.mode === "strip") cx.timer.every(10000, cx => this.tick(cx));
@@ -82,7 +87,7 @@ export default class AgentQuota extends View {
         const command = await nextCommand();
         // Herdr ends a replaced build's loop at its next cx use; without one, a retired
         // copy whose nextCommand() resolves at once would spin the main thread forever.
-        cx.notify();
+        cx.phase();
         if (typeof command !== "string") return;
         if (command === "menu" || command === "open") this.open();
         if (command === "settings") this.open(null, "configure");
@@ -91,7 +96,7 @@ export default class AgentQuota extends View {
     });
   }
 
-  opts() { return options(props()?.start ?? props() ?? {}, get("options") ?? {}); }
+  opts() { const p = props() ?? {}; return options(p.start ?? p, get("options") ?? {}); }
   save(change) {
     const current = this.opts(), next = { ...current, ...change };
     if (JSON.stringify(options(props()?.start ?? props() ?? {}, next)) !== JSON.stringify(current)) put("options", next);
@@ -101,11 +106,27 @@ export default class AgentQuota extends View {
   frame() {
     const o = this.opts(), header = this.mode === "header";
     const live = header ? [] : agents(), places = header ? [] : spaces();
-    const all = catalog(get("data"), get("discovered") ?? [], live, places, o);
+    if (this.mode === "strip") this.observe(Date.now(), live);
+    const paneId = header ? props()?.pane : null;
+    const pane = header ? panes().find(p => p.pane === paneId) : null;
+    const id = pane ? providerId(pane.program?.key || pane.app) : null;
+    let report;
+    if (header) {
+      // Live terminal changes can repaint every header. Read the small control record first;
+      // only deserialize quota again when a collection starts/completes or the program changes.
+      const c = get("control"), revision = `${id}/${c?.attempt ?? 0}/${c?.token ?? ""}`;
+      if (this.headerRevision !== revision) {
+        this.headerReport = { providers: (get("data")?.providers ?? []).filter(p => p.id === id) };
+        this.headerRevision = revision;
+      }
+      report = this.headerReport;
+    } else report = get("data");
+    const all = header ? report.providers : catalog(report, get("discovered") ?? [], live, places, o);
     // Overview lists what can be read or acted on; Settings lists everything.
     const useful = p => p.windows.length || p.sessions.length || p.status === "auth_required" || o.signedOut;
+    const config = settings(), font = config.font_family;
     return { o, all, shown: all.filter(p => !o.hidden.includes(p.id) && useful(p)), now: Date.now(), failed: Boolean(get("error")),
-      agents: live, spaces: places, t: colors(theme(), settings().dark !== false, o.palette), mono: settings().font_family ?? "JetBrains Mono" };
+      agents: live, spaces: places, pane, t: colors(theme(), config.dark !== false, o.palette), mono: typeof font === "string" ? font : "JetBrains Mono" };
   }
   state(w, p) { return windowState(w, p, this.f.now, this.f.failed); }
 
@@ -121,8 +142,8 @@ export default class AgentQuota extends View {
   refresh(cx) { this.tick(cx, { force: true }); }
 
   // A turn has finished when an agent that was working no longer is (or has gone).
-  observe(now) {
-    const live = agents(), next = new Map(live.map(a => [a.address, a.status]));
+  observe(now, live = agents()) {
+    const next = new Map(live.map(a => [a.address, a.status]));
     if (this.statuses) for (const [address, status] of this.statuses) {
       if (status === "working" && next.get(address) !== "working" && !this.finishedAt) this.finishedAt = now;
     }
@@ -134,39 +155,48 @@ export default class AgentQuota extends View {
     const now = Date.now(), control = get("control") ?? null, data = get("data") ?? null;
     const live = this.mode === "strip" ? this.observe(now) : agents();
     if (this.finishedAt && this.finishedAt <= (control?.attempt ?? 0)) this.finishedAt = 0;
-    if (this.pending || now - inFlight < 45000) return;
+    if (this.pending || control?.busyUntil > now) return;
     const reason = schedule({ now, control, hasData: Boolean(data), force, looking,
       working: live.some(a => a.status === "working"), finished: this.finishedAt > 0, resetDue: resetDue(data, control, now) });
     if (!reason) return;
     const sweep = needsSweep(control, now, reason);
     const ids = sweep ? null : targets(data, get("discovered") ?? [], live);
     this.pending = true;
-    inFlight = now;
+    const token = `${this.id}-${now}`;
+    // Claim synchronously before yielding: a second strip/dashboard sees it immediately.
+    put("control", { ...control, attempt: now, busyUntil: now + CLAIM_MS, token });
     if (force || looking) cx.notify();
     cx.spawn(async cx => {
+      cx.phase();
+      if (get("control")?.token !== token || Date.now() - now >= CLAIM_MS) { this.pending = false; return; }
       const next = { attempt: now, failures: 0, sweptAt: control?.sweptAt ?? 0, discoveredAt: control?.discoveredAt ?? 0, reason };
+      let result, error = null;
       try {
-        if (now - next.discoveredAt >= CADENCE.discover || reason === "manual") {
-          try {
-            const list = await knownAgents();
-            put("discovered", list.map(a => ({ key: a.key, name: a.name, icon: a.icon, tint: a.tint, installed: a.installed })));
-            next.discoveredAt = now;
-          } catch { /* quota still works when discovery fails */ }
-        }
-        const { report, swept } = await collect(exec, this.runtime, Date.now(), ids);
-        put("data", mergeReport(get("data"), report, swept));
-        if (swept) next.sweptAt = now;
-        put("error", null);
+        result = await collect(exec, this.runtime, Date.now(), ids, now + CLAIM_MS - 5000);
+        if (result.swept) next.sweptAt = now;
       } catch (e) {
         // Only this mod's own messages are kept; anything else could echo subprocess output.
-        put("error", e instanceof QuotaError ? e.message.slice(0, 160) : GENERIC_ERROR);
+        error = e instanceof QuotaError ? e.message.slice(0, 160) : GENERIC_ERROR;
         next.failures = (control?.failures ?? 0) + 1;
-      } finally {
-        put("control", next);
-        this.pending = false;
-        inFlight = 0;
-        cx.notify();
       }
+      cx.phase();
+      // A late answer from an expired/replaced claim must not clobber newer readings.
+      if (get("control")?.token !== token) { this.pending = false; return; }
+      if (result) put("data", mergeReport(get("data"), result.report, result.swept));
+      put("error", error);
+      // Discovery isn't on the collection critical path and never holds its claim open.
+      const discover = now - next.discoveredAt >= CADENCE.discover || (reason === "manual" && now - next.discoveredAt >= CADENCE.gap);
+      if (discover) next.discoveredAt = now; // rate-limit failures too
+      put("control", next);
+      this.pending = false;
+      cx.notify();
+      if (discover) cx.spawn(async cx => {
+        cx.phase();
+        let list;
+        try { list = await knownAgents(); } catch { return; }
+        cx.phase();
+        put("discovered", list.map(a => ({ key: a.key, name: a.name, icon: a.icon, tint: a.tint, installed: a.installed })));
+      });
     });
   }
 
@@ -174,7 +204,23 @@ export default class AgentQuota extends View {
     openOverlay({ mod: "agent-quota", kind: "window", key: "agent-quota-dashboard", width: 850, height: 660,
       props: { mode: "dashboard", provider, page, start: this.opts() } });
   }
-  close() { if (props()?.overlay) closeOverlay(props().overlay); }
+  dismiss() { if (props()?.overlay) closeOverlay(props().overlay); }
+
+  // Bound eager native builders. Ordinary scroll areas still build offscreen children;
+  // pagination keeps every account/limit/session accessible without unbounded host calls.
+  pageItems(id, items, size) {
+    const total = Math.max(1, Math.ceil(items.length / size));
+    const page = Math.min(this.pages[id] ?? 0, total - 1);
+    return { items: items.slice(page * size, (page + 1) * size), page, total };
+  }
+  pager(id, { page, total }, t) {
+    if (total <= 1) return null;
+    const change = delta => (_e, cx) => { this.pages[id] = page + delta; cx.notify(); };
+    return h_flex().gap(8).py(6).items_center()
+      .when(page > 0, el => el.child(this.button(`${id}-prev`, "← Previous", change(-1), t, { small: true })))
+      .child(label(`Page ${page + 1} of ${total}`, 11, t.muted))
+      .when(page + 1 < total, el => el.child(this.button(`${id}-next`, "Next →", change(1), t, { small: true })));
+  }
 
   // ── controls ─────────────────────────────────────────────
 
@@ -413,7 +459,8 @@ export default class AgentQuota extends View {
 
   sessions(p) {
     const { t } = this.f;
-    return v_flex().gap(1).children(p.sessions.map(a => {
+    const id = `sessions-${p.key}`, page = this.pageItems(id, p.sessions, SESSION_PAGE);
+    return v_flex().gap(1).children(page.items.map(a => {
       const machine = this.f.spaces.find(s => s.id === a.space)?.machine;
       const remote = remoteAgent(a, this.f.spaces);
       const where = `${a.space_name} / ${a.tab_name}`;
@@ -421,18 +468,19 @@ export default class AgentQuota extends View {
         .role("button").accessibility_label(`Go to ${p.label} in ${where}`).tab_stop(true).tab_index(0)
         .border(1).border_color(t.popover).focus(s => s.border_color(t.accent)).cursor_pointer().hover(s => s.bg(t.hover))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click((_e, cx) => { cx.stop_propagation(); this.close(); run("agent.focus", { terminal: a.address }); })
+        .on_click((_e, cx) => { cx.stop_propagation(); this.dismiss(); run("agent.focus", { terminal: a.address }); })
         .child(label(STATE_MARK[a.status] ?? "·", 11, t[a.status] ?? t.muted).w(12).flex_none())
         .child(label(STATE_LABEL[a.status] ?? a.status, 11, t[a.status] ?? t.muted).w(72).flex_none())
         .child(label(where, 11, t.foreground).flex_1().min_w(0).truncate())
         .when(remote, el => el.child(label(machine ? `on ${machine}` : "remote", 10, t.muted).flex_none()
           .tooltip("Runs on another machine. Its quota is not linked to this computer's sign-ins.")))
         .child(label("go to →", 10, t.muted).flex_none());
-    }));
+    })).child(this.pager(id, page, t));
   }
 
   provider(p) {
-    const { o, t } = this.f, ws = visibleWindows(p, o), content = this.width - 48;
+    const { o, t } = this.f, limits = visibleWindows(p, o), content = this.width - 48;
+    const limitId = `limits-${p.key}`, limitPage = this.pageItems(limitId, limits, LIMIT_PAGE), ws = limitPage.items;
     const working = p.sessions.filter(a => a.status === "working").length;
     const blocked = p.sessions.filter(a => a.status === "blocked").length;
     const activity = blocked ? [`▲ ${blocked} needs you`, t.blocked] : working ? [`● ${working} working`, t.working] : p.sessions.length ? [`○ ${p.sessions.length} open`, t.muted] : ["not running", t.dim ?? t.muted];
@@ -456,6 +504,7 @@ export default class AgentQuota extends View {
         .child(label(activity[0], 11, activity[1]).flex_none()))
       .when(Boolean(status), el => el.child(label(status, 11, t.warning)))
       .when(Boolean(body), el => el.child(body))
+      .child(this.pager(limitId, limitPage, t))
       .when(Boolean(empty), el => el.child(h_flex().gap(10).items_center()
         .child(label(`— ${empty[0]}`, 12, t.muted))
         .when(Boolean(empty[1]), el => el.child(this.button(`limits-${p.key}`, empty[1], (_e, cx) => { this.page = "configure"; cx.notify(); }, t, { small: true })))))
@@ -479,6 +528,7 @@ export default class AgentQuota extends View {
     const set = change => this.save(change);
     const flip = field => () => set({ [field]: !this.opts()[field] });
     const preview = this.stripItems(this.width - 48);
+    const providerPage = this.pageItems("configure-providers", all, PROVIDER_PAGE);
     return v_flex().pb(20)
       .child(this.section("── status bar", t))
       .child(h_flex().h(30).mx(10).mb(6).px(12).gap(14).items_center().justify_end().overflow_hidden().rounded(4)
@@ -500,20 +550,22 @@ export default class AgentQuota extends View {
       .child(this.section("── providers", t))
       .child(this.switchRow("active-first", "Running agents first", "Agents you're using sort to the front.", o.activeFirst, flip("activeFirst"), t))
       .child(this.switchRow("signed-out", "Providers without quota", "List signed-out and unsupported providers too.", o.signedOut, flip("signedOut"), t))
-      .children(all.map(p => {
+      .children(providerPage.items.map(p => {
         const visible = !o.hidden.includes(p.id);
+        const limitId = `choices-${p.key}`, limits = this.pageItems(limitId, p.windows, LIMIT_PAGE);
         const hint = p.windows.length ? `${visibleWindows(p, o).length} of ${p.windows.length} limits shown` : p.status === "auth_required" ? "Sign-in needed" : p.remote ? "Remote activity only" : "No quota reported";
         return v_flex().gap(6)
           .child(this.switchRow(`provider-${p.key}`, `${p.label}${p.multiAccount ? ` · ${p.account}` : ""}`, hint, visible, () => {
             const hidden = this.opts().hidden;
             set({ hidden: hidden.includes(p.id) ? hidden.filter(id => id !== p.id) : [...hidden, p.id] });
           }, t))
-          .when(visible && p.windows.length > 0, el => el.child(h_flex().pl(10).pb(6).gap(6).flex_wrap().children(p.windows.map(w =>
+          .when(visible && p.windows.length > 0, el => el.child(h_flex().pl(10).pb(6).gap(6).flex_wrap().children(limits.items.map(w =>
             this.chip(`window-${w.key}`, shortLabel(w, p.windows), shows(w, o), () => {
               const current = this.opts();
               set({ windows: { ...current.windows, [w.key]: !shows(w, current) } });
-            }, t)))));
+            }, t)))).child(this.pager(limitId, limits, t)));
       }))
+      .child(this.pager("configure-providers", providerPage, t))
       .child(this.section("── about this data", t))
       .child(v_flex().px(10).gap(4)
         .child(label("Reads after an agent finishes a turn (at most once a minute), every 3 minutes while agents work, and every 10 minutes otherwise. Never makes inference requests.", 11, t.muted))
@@ -525,7 +577,8 @@ export default class AgentQuota extends View {
     const { o, t, now, shown, failed } = this.f;
     const selected = props()?.provider;
     const list = selected ? shown.filter(p => p.id === selected) : shown;
-    const lines = redlines(shown, o, now, failed);
+    const providerPage = this.pageItems("overview-providers", list, PROVIDER_PAGE);
+    const lines = this.page === "overview" ? redlines(shown, o, now, failed) : [];
     const busy = this.pending;
     const count = this.f.agents.length;
     const toSettings = (_e, cx) => { this.page = "configure"; cx.notify(); };
@@ -534,22 +587,23 @@ export default class AgentQuota extends View {
       .when(lines.length > 0, el => el.child(h_flex().mt(14).px(12).py(8).gap(10).items_center().rounded(4)
         .border(1).border_color(t.redline).when(Boolean(tint(t.redline, "1a")), el => el.bg(tint(t.redline, "1a")))
         .child(label("▲", 12, t.redline))
-        .child(label(`Over redline · ${lines.map(x => `${x.p.label} ${shortLabel(x.w, x.p.windows)} ${Math.round(x.w.percentUsed)}%`).join(", ")}`, 12, t.redline).flex_1().min_w(0).truncate())))
+        .child(label(`Over redline · ${lines.slice(0, 3).map(x => `${x.p.label} ${shortLabel(x.w, x.p.windows)} ${Math.round(x.w.percentUsed)}%`).join(", ")}${lines.length > 3 ? ` · +${lines.length - 3} limits` : ""}`, 12, t.redline).flex_1().min_w(0).truncate())))
       .when(!list.length, el => el.child(v_flex().gap(10).py(30).items_start()
         .child(label("No providers to show", 15, t.foreground))
         .child(label("Start an agent in Herdr, or show hidden providers in Settings.", 12, t.muted))
         .child(this.button("empty-settings", "Open settings", toSettings, t))))
-      .children(list.map(p => this.provider(p)));
+      .children(providerPage.items.map(p => this.provider(p)))
+      .child(this.pager("overview-providers", providerPage, t));
     return v_flex().id("agent-quota-dashboard").size_full().bg(t.popover).text_color(t.foreground).font_family(this.f.mono)
       .on_size_change((s, cx) => this.resized(s, cx))
-      .track_focus(this.keys).on_key_down(e => { if (e.key === "escape") this.close(); })
+      .track_focus(this.keys).on_key_down(e => { if (e.key === "escape") this.dismiss(); })
       .child(h_flex().px(24).pt(18).pb(12).gap(8).items_center().flex_none()
         .child(v_flex().gap(4).flex_1().min_w(0)
           .child(label("Agent quota", 17, t.foreground).font_semibold())
           .child(label(`${count} ${count === 1 ? "agent" : "agents"} · ${this.f.spaces.length} spaces · ${ageLabel(get("data")?.at, now).toLowerCase()}`, 11, t.muted).truncate()))
         .child(this.button("refresh", busy ? "Refreshing" : "↻ Refresh", (_e, cx) => this.refresh(cx), t, { a11y: busy ? "Refreshing quota" : "Refresh quota" })
           .when(busy, el => el.child(div().w(10).text_color(t.muted).frames(SPINNER, 90).child(SPINNER[0]))))
-        .when(Boolean(props()?.overlay), el => el.child(this.button("close", "✕", () => this.close(), t, { a11y: "Close" }))))
+        .when(Boolean(props()?.overlay), el => el.child(this.button("close", "✕", () => this.dismiss(), t, { a11y: "Close" }))))
       .child(h_flex().px(24).pb(12).gap(8).items_center().flex_none()
         .child(this.segmented("page", [["overview", "Overview"], ["configure", "Settings"]], this.page, (v, cx) => { this.page = v; cx.notify(); }, t))
         .child(div().flex_1())
@@ -582,7 +636,7 @@ export default class AgentQuota extends View {
 
   header() {
     const { o, t } = this.f;
-    const p = panes().find(p => p.pane === props()?.pane);
+    const p = this.f.pane;
     if (!p) return div();
     const id = providerId(p.program?.key || p.app);
     const lanes = this.f.all.filter(a => a.id === id);

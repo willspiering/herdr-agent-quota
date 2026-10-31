@@ -52,11 +52,11 @@ export function flatten(element) {
   if (typeof element === "string" || typeof element === "number") return String(element);
   return element?.nodes?.map(flatten).join(" ") ?? "";
 }
-export async function createHost({ nextCommand = () => new Promise(() => {}), mode = "dashboard", data = null, live = [], installed = [], paneList = [], spaceList = [], runtime = {}, runner } = {}) {
-  const source = await readFile(new URL("../mods/agent-quota/main.js", import.meta.url), "utf8");
-  const state = { [`${core.PREFIX}.data`]: data, [`${core.PREFIX}.discovered`]: installed };
+export async function createHost({ nextCommand = () => new Promise(() => {}), mode = "dashboard", data = null, live = [], installed = [], paneList = [], spaceList = [], runtime = {}, runtimeFile = null, runner, sharedState, clock, source: inputSource, coreModule = core } = {}) {
+  const source = inputSource ?? await readFile(new URL("../mods/agent-quota/main.js", import.meta.url), "utf8");
+  const state = sharedState ?? { [`${core.PREFIX}.data`]: data, [`${core.PREFIX}.discovered`]: installed };
   const properties = { mode, ...runtime };
-  const tasks = [], timers = [], overlays = [], commands = [], writes = [], reads = { agents: 0, spaces: 0 };
+  const tasks = [], timers = [], overlays = [], commands = [], writes = [], sharedReads = [], reads = { agents: 0, spaces: 0 };
   let phase = "init";
   const focus = { allocations: 0 };
   const cx = {
@@ -64,21 +64,21 @@ export async function createHost({ nextCommand = () => new Promise(() => {}), mo
       if (phase === "render") throw new Error("cx.focus_handle() cannot run during render");
       focus.allocations++;
       return { focus() {}, is_focused: () => false };
-    }, notify() {}, stop_propagation() {},
+    }, notify() {}, phase() { return phase; }, stop_propagation() {},
     spawn(fn) { tasks.push(fn); }, timer: { every(ms, fn) { timers.push({ ms, fn }); } },
   };
   const api = {
-    exec: runner ?? (async () => { throw Error("Not installed"); }), appHome: () => "/preview", readTextFile: async () => null,
+    exec: runner ?? (async () => { throw Error("Not installed"); }), appHome: () => "/preview", readTextFile: async () => runtimeFile && JSON.stringify(runtimeFile),
     knownAgents: async () => installed, agents: () => (reads.agents++, live), spaces: () => (reads.spaces++, spaceList), panes: () => paneList,
-    theme: () => palette, settings: () => ({ dark: true, font_family: "JetBrains Mono" }), shared: name => state[name], setShared: (name, value) => { writes.push(name); state[name] = value; },
+    theme: () => palette, settings: () => ({ dark: true, font_family: "JetBrains Mono" }), shared: name => { sharedReads.push(name); return state[name]; }, setShared: (name, value) => { writes.push(name); state[name] = value; },
     props: () => properties, openOverlay: spec => { overlays.push(spec); return "overlay"; }, closeOverlay: id => commands.push(["close", id]),
     nextCommand, run: (name, args) => commands.push([name, args]),
   };
-  const deps = { ...constructors, ...api, ...core, ...collector };
+  const deps = { ...constructors, ...api, ...coreModule, ...collector, Date: clock ? class extends Date { static now() { return clock.now; } } : Date };
   const code = source.replace(/import[\s\S]*?from\s+"[^";]+";/g, "").replace("export function colors", "function colors").replace("export default class AgentQuota", "class AgentQuota");
   const AgentQuota = new Function(...Object.keys(deps), `${code}\nreturn AgentQuota;`)(...Object.values(deps));
   const view = new AgentQuota(); view.init(properties, cx);
-  return { view, cx, state, tasks, timers, overlays, commands, writes, reads, properties, focus, tree() {
+  return { view, cx, state, tasks, timers, overlays, commands, writes, reads, sharedReads, properties, focus, tree() {
     phase = "render";
     try { return view.render(cx); } finally { phase = "event"; }
   } };

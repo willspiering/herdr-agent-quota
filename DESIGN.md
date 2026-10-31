@@ -104,6 +104,11 @@ Overview/Settings segmented control with `redline N%`, a 1px rule, the
 scrolling body and a one-line footer. Provider sections are 16 vertical
 padding with a `glyph name [plan] ───── activity` heading.
 
+To bound eager GPUI descriptions, Overview and Settings show four provider/account
+sections per page. Each account shows eight limits (or setting chips) and eight
+agent sessions per page, with native Previous/Next controls. Redline summary text
+shows three entries and counts the remainder. No underlying reading is truncated.
+
 Meter rows: label 72, meter `width − 430` (min 60, max 520), value 76,
 reset 130, pace 100; below 640 content width the pace column drops. Gauges
 wrap at `floor((width + 10) / 166)` columns.

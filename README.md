@@ -38,11 +38,13 @@ For Claude on macOS, you may need a one-time Keychain grant:
 npm ci --ignore-scripts
 npm test
 npm run check
+npm run benchmark
 ```
 
 This is an early v1. Remote-account quota collection and absolute token counts
 are not implemented. Known issues and validation notes are in
-[VALIDATION.md](VALIDATION.md).
+[VALIDATION.md](VALIDATION.md). The performance review and remaining native
+checks are in [PERFORMANCE_REVIEW.md](PERFORMANCE_REVIEW.md).
 
 ## Credits
 

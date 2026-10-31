@@ -67,8 +67,9 @@ running. Terminals in herdr-core stayed live throughout.
   did not. `sample` showed all main-thread time in one render, inside an
   `Array.find` callback, in `rquickjs_jit::maintenance` building feedback
   snapshots. The previous round's hang showed the same `record_hot →
-  maintenance_if_due` path. Conclusion: JIT state accumulated across reloads
-  (a Herdr runtime issue made worse by test churn), not a loop in this mod.
+  maintenance_if_due` path. These samples suggest a runtime interaction after
+  reload churn; they do not establish Herdr as the sole cause or rule out mod
+  defects. The performance review found additional mod scaling/lifecycle issues.
 - After a graceful window restart (all 7 terminals stayed live), the same build
   measured 7–8% CPU with no JIT maintenance frames; the startup read was a
   targeted `working` read with no error.
@@ -94,6 +95,13 @@ running. Terminals in herdr-core stayed live throughout.
   (no pointer automation). `npm test`: 64 passing.
 
 ## Remaining native checks
+
+The subsequent review and follow-up fixes are documented in
+`PERFORMANCE_REVIEW.md`. That build has not been installed or approved natively.
+Its regression suite passes on Node 24.11.1 and its source type-checks against
+the installed declarations. `herdr-app check` is blocked in this session by
+macOS UI/XPC access and reaches the check script's timeout; desktop access also
+failed to start. Earlier native observations above do not validate the follow-up.
 
 - Compare measurements directly against provider data and test authentication
   recovery without exposing credentials.

@@ -46,7 +46,7 @@ try {
   cli("herdr-app", ["check", join(root, "mods", MOD)]);
   await mkdir(installedPath, { recursive: true });
   await cp(join(root, "mods", MOD), installedPath, { recursive: true });
-  await writeFile(join(installedPath, "runtime.json"), JSON.stringify({ node: process.execPath, collector }, null, 2) + "\n");
+  await writeFile(join(installedPath, "runtime.json"), JSON.stringify({ node: process.execPath, collector, runner: join(root, "scripts/collect.mjs") }, null, 2) + "\n");
   // Mark our copied files before the live commands, so interrupted setup can retry.
   await writeFile(markerPath, JSON.stringify({ project: "herdr-agent-quota", version: "0.1.0", layout: cloneName, previousLayout: marker?.previousLayout ?? sourceName, source: root }, null, 2) + "\n");
   if (!await exists(join(home, "layouts", `${cloneName}.json`))) {

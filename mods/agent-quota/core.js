@@ -70,7 +70,8 @@ export function parseReport(stdout, now = Date.now()) {
   const at = generated !== null && generated <= now + 60000 ? Math.min(generated, now) : now;
   const lanes = new Set();
   const providers = [];
-  for (const p of report.providers.slice(0, 200)) {
+  if (report.providers.length > 200) throw new QuotaError("Quota report has too many account lanes. Previous readings were kept.");
+  for (const p of report.providers) {
     if (!p || typeof p.provider !== "string") continue;
     const id = providerId(p.provider);
     if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id)) continue;
@@ -80,7 +81,8 @@ export function parseReport(stdout, now = Date.now()) {
     lanes.add(key);
     const untrusted = new Set(Array.isArray(p.untrustedWindowIds) ? p.untrustedWindowIds : []);
     const windowIds = new Set();
-    const windows = (Array.isArray(p.windows) ? p.windows : []).slice(0, 100).filter(Boolean).map(w => {
+    if (Array.isArray(p.windows) && p.windows.length > 100) throw new QuotaError("Quota report has too many limits in an account. Previous readings were kept.");
+    const windows = (Array.isArray(p.windows) ? p.windows : []).filter(Boolean).map(w => {
       const wid = text(w.id) || JSON.stringify([text(w.kind, "unknown"), text(w.label, "Unnamed limit")]);
       if (windowIds.has(wid)) throw new QuotaError("Collector returned duplicate limit identities.");
       windowIds.add(wid);
@@ -158,6 +160,8 @@ export function remoteAgent(a, spaces) { return a.address?.includes("/") || Bool
 export function catalog(report, discovered, live, spaces, o) {
   const list = (report?.providers ?? []).map(p => ({ ...p, installed: false, sessions: [], remote: false }));
   const byId = new Map();
+  const machines = new Map(spaces.map(s => [s.id, s.machine]));
+  const activity = new Map();
   for (const p of list) { if (!byId.has(p.id)) byId.set(p.id, []); byId.get(p.id).push(p); }
   const ensure = (id, label) => {
     if (!byId.has(id)) {
@@ -174,18 +178,28 @@ export function catalog(report, discovered, live, spaces, o) {
   for (const a of live) {
     const id = activeProvider(a);
     if (!id) continue;
-    const lanes = ensure(id, a.program?.name || id);
-    // Associate activity with the provider, never claim a particular account.
-    for (const p of lanes) { p.sessions.push(a); p.program ??= a.program; }
+    if (!activity.has(id)) activity.set(id, { sessions: [], local: [], remote: [], program: a.program, urgency: 0 });
+    const group = activity.get(id);
+    group.sessions.push(a);
+    (a.address?.includes("/") || machines.get(a.space) ? group.remote : group.local).push(a);
+    group.urgency = Math.max(group.urgency, a.focused ? 4 : a.status === "working" ? 3 : a.status === "blocked" ? 2 : 1);
+    ensure(id, a.program?.name || id);
   }
   for (const p of list) {
-    p.localSessions = p.sessions.filter(a => !remoteAgent(a, spaces));
-    p.remoteSessions = p.sessions.filter(a => remoteAgent(a, spaces));
+    const group = activity.get(p.id);
+    // The activity belongs to a provider, never a particular account. Classify once,
+    // then share read-only arrays across its lanes instead of scanning spaces per lane.
+    p.sessions = group?.sessions ?? [];
+    p.localSessions = group?.local ?? [];
+    p.remoteSessions = group?.remote ?? [];
+    p.program ??= group?.program;
     p.remote = p.sessions.length > 0 && p.localSessions.length === 0 && !p.installed && !p.windows.length;
     p.multiAccount = (byId.get(p.id)?.length ?? 0) > 1;
   }
-  const fav = id => { const i = o.favorites.indexOf(id); return i < 0 ? 1000 : i; };
-  const urgency = p => p.sessions.some(a => a.focused) ? 4 : p.sessions.some(a => a.status === "working") ? 3 : p.sessions.some(a => a.status === "blocked") ? 2 : p.sessions.length ? 1 : 0;
+  const favorites = new Map();
+  o.favorites.forEach((id, i) => { if (!favorites.has(id)) favorites.set(id, i); });
+  const fav = id => favorites.get(id) ?? 1000;
+  const urgency = p => activity.get(p.id)?.urgency ?? 0;
   return list.filter(p => p.installed || p.sessions.length || p.windows.length || o.signedOut)
     .sort((a, b) => (o.activeFirst ? urgency(b) - urgency(a) : 0) || fav(a.id) - fav(b.id) || a.label.localeCompare(b.label) || a.account.localeCompare(b.account));
 }
