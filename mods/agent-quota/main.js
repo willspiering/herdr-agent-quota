@@ -33,6 +33,8 @@ const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", 
 // deadline (or 24 s after its own launch, if sooner), and Herdr's exec cap is 30 s. The claim
 // lasts 5 s longer, so a cancelled copy's claim recovers without overlapping a live read.
 const CLAIM_MS = READ_MS + 5000;
+// How long a dashboard waits for the strip to claim a read it asked for before reading itself.
+const DELEGATE_MS = 4000;
 const PROVIDER_PAGE = 4, LIMIT_PAGE = 8, SESSION_PAGE = 8;
 const CLASSIC = { dark: ["#80c9ae", "#e1bc75", "#f48e83"], light: ["#226b50", "#79530c", "#ad302d"] };
 
@@ -75,13 +77,14 @@ export default class AgentQuota extends View {
     this.statuses = null;
     this.finishedAt = 0;
     this.pages = {};
-    // Pane headers, one per pane, only display. The strip schedules reads; the dashboard reads
-    // when opened. The 10 s check is in-memory: it runs a read only when one is due.
+    // Pane headers, one per pane, only display. The strip schedules and runs reads; an opened
+    // dashboard asks it for one. The 10 s check is in-memory: it reads only when one is due.
     if (this.mode !== "header") cx.spawn(async cx => {
       try { this.runtime = JSON.parse(await readTextFile(`${appHome()}/mods/agent-quota/.runtime.json`) || "{}"); } catch { /* collection reports setup instructions */ }
       cx.phase(); // End retired tasks before they start a subprocess or publish state.
-      this.tick(cx, { looking: this.mode === "dashboard" });
+      if (this.mode === "strip") this.tick(cx);
     });
+    if (this.mode === "dashboard") this.read(cx, "look");
     if (this.mode === "strip") cx.timer.every(10000, cx => this.tick(cx));
     if (this.mode === "dashboard") cx.timer.every(60000, cx => cx.notify());
     if (this.mode === "strip") cx.spawn(async cx => {
@@ -94,6 +97,7 @@ export default class AgentQuota extends View {
         if (command === "menu" || command === "open") this.open();
         if (command === "settings") this.open(null, "configure");
         if (command === "refresh") this.refresh(cx);
+        if (command === "look") this.tick(cx, { looking: true });
       }
     });
   }
@@ -150,12 +154,28 @@ export default class AgentQuota extends View {
     const now = Date.now(), control = get("control");
     if (this.pending || control?.busyUntil > now) { cx.notify(); return; }
     const wait = CADENCE.manual - (now - (control?.attempt ?? 0));
-    if (wait <= 0) { this.tick(cx, { force: true }); return; }
+    if (wait <= 0) { this.read(cx, "refresh"); return; }
     if (!this.queued) {
       this.queued = true;
-      cx.timer.after(wait, cx => { this.queued = false; this.tick(cx, { force: true }); cx.notify(); });
+      cx.timer.after(wait, cx => { this.queued = false; this.read(cx, "refresh"); cx.notify(); });
     }
     cx.notify();
+  }
+
+  // A dashboard copy lives only while its window is open; a read it owned would be cancelled by
+  // closing it, leaving an orphaned claim and no data. So it asks the long-lived strip (claimed in
+  // ~0.1 s natively), and reads itself only if nothing was claimed within DELEGATE_MS (a layout
+  // without the strip).
+  read(cx, why) {
+    const options = why === "look" ? { looking: true } : { force: true };
+    if (this.mode !== "dashboard") { this.tick(cx, options); return; }
+    const asked = Date.now();
+    run(`agent-quota.${why}`);
+    cx.timer.after(DELEGATE_MS, cx => {
+      const c = get("control");
+      if ((c?.attempt ?? 0) >= asked || c?.busyUntil > Date.now() || !this.runtime.runner) return;
+      this.tick(cx, options);
+    });
   }
 
   // A turn has finished when an agent that was working no longer is (or has gone).
@@ -190,6 +210,9 @@ export default class AgentQuota extends View {
     // Claim synchronously before yielding: a second strip/dashboard sees it immediately.
     put("control", { ...control, attempt: now, busyUntil: now + CLAIM_MS, token });
     if (force || looking) cx.notify();
+    // Owned by this copy explicitly: tick() also runs inside task continuations (after init's
+    // await), where TaskOptions.owner would default to "whichever view is running".
+    const own = { owner: this };
     cx.spawn(async cx => {
       cx.phase();
       if (get("control")?.token !== token || Date.now() - now >= CLAIM_MS) { this.pending = false; return; }
@@ -221,8 +244,8 @@ export default class AgentQuota extends View {
         try { list = await knownAgents(); } catch { return; }
         cx.phase();
         put("discovered", list.map(a => ({ key: a.key, name: a.name, icon: a.icon, tint: a.tint, installed: a.installed })));
-      });
-    });
+      }, own);
+    }, own);
   }
 
   open(provider = null, page = "overview") {

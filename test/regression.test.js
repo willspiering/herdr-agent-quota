@@ -181,13 +181,13 @@ test("F4: a Refresh inside the cooldown is queued and says so", async () => {
   let refresh; walk(host.tree(), n => { if (n.styles.id?.[0] === "refresh") refresh = n; });
   refresh.events.click({}, host.cx);
   assert.match(flatten(host.tree()), /Queued/);
-  const queued = host.timers.find(t => t.once);
+  const queued = host.timers.filter(t => t.once).at(-1);
   assert.ok(queued, "no follow-up scheduled");
   assert.ok(queued.ms <= 7000 + 100 && queued.ms >= 6000, `${queued.ms} ms`);
   clock.now += queued.ms;
   queued.fn(host.cx);
-  await host.tasks.at(-1)(host.cx);
-  assert.equal(runs.length, 1);
+  assert.ok(host.commands.some(c => c[0] === "agent-quota.refresh"), "queued refresh not sent to the strip");
+  assert.equal(runs.length, 0);
   assert.doesNotMatch(flatten(host.tree()), /Queued/);
 });
 
@@ -275,4 +275,37 @@ test("native: an orphaned claim (copy stopped mid-read) is cleared once it expir
   assert.equal(strip.writes.length, writes + 1);
   strip.timers[0].fn(strip.cx);
   assert.equal(strip.writes.length, writes + 1, "cleared once, not rewritten every check");
+});
+
+test("native: a read started from a task continuation is owned by its own copy", async () => {
+  // Seen natively: the dashboard's look read (spawned after `await readTextFile` in init) launched
+  // the supervisor but never published; TaskOptions.owner defaults to whichever view is running.
+  const host = await createHost({ mode: "strip", data: parseReport(report([codex])), runtimeFile: { node: "/n", runner: "/r", collector: "/c" } });
+  host.state[`${PREFIX}.control`] = { attempt: Date.now() - 700000, sweptAt: Date.now() };
+  await host.tasks[0](host.cx); // init: read the runtime, then the startup read
+  assert.equal(host.tasks.length, 3, "startup read not started");
+  assert.equal(host.spawns[2]?.owner, host.view, "read task must be owned by this copy");
+});
+
+test("native: a dashboard reads itself only when no strip claimed the read it asked for", async () => {
+  const runs = [], clock = { now: Date.now() };
+  const runner = async (_c, args) => { runs.push(args); return { code: 0, stdout: report([codex]) }; };
+  const make = () => createHost({ clock, data: parseReport(report([codex])), runner, runtimeFile: { node: "/n", runner: "/r", collector: "/c" } });
+  // A strip claimed it: the fallback does nothing.
+  const served = await make();
+  await served.tasks[0](served.cx);
+  served.state[`${PREFIX}.control`] = { attempt: clock.now, busyUntil: clock.now + 35000, token: "strip" };
+  served.timers.find(t => t.once).fn(served.cx);
+  assert.equal(served.tasks.length, 1);
+  // No strip: after DELEGATE_MS the dashboard reads data older than a minute itself.
+  const alone = await make();
+  await alone.tasks[0](alone.cx);
+  alone.state[`${PREFIX}.control`] = { attempt: clock.now - 90000, sweptAt: clock.now };
+  const fallback = alone.timers.find(t => t.once);
+  assert.ok(fallback.ms <= 5000, `${fallback.ms} ms`);
+  clock.now += fallback.ms;
+  fallback.fn(alone.cx);
+  await alone.tasks.at(-1)(alone.cx);
+  assert.equal(runs.length, 1);
+  assert.equal(alone.state[`${PREFIX}.control`].reason, "look");
 });

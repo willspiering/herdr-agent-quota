@@ -99,7 +99,7 @@ export async function createHost({ nextCommand = () => new Promise(() => {}), mo
   const source = inputSource ?? await readFile(new URL("../mods/agent-quota/main.js", import.meta.url), "utf8");
   const state = sharedState ?? { [`${core.PREFIX}.data`]: copy(data), [`${core.PREFIX}.discovered`]: copy(installed) };
   const properties = { mode, ...runtime };
-  const tasks = [], timers = [], overlays = [], commands = [], writes = [], sharedReads = [], reads = { agents: 0, spaces: 0 }, renders = { requested: 0 };
+  const tasks = [], spawns = [], timers = [], overlays = [], commands = [], writes = [], sharedReads = [], reads = { agents: 0, spaces: 0 }, renders = { requested: 0 };
   let phase = "init", retired = false;
   const focus = { allocations: 0 };
   const cx = {
@@ -110,7 +110,7 @@ export async function createHost({ nextCommand = () => new Promise(() => {}), mo
     }, notify() { renders.requested++; },
     // A replaced build's loop ends at its next cx use.
     phase() { if (retired) throw new Error("view released"); return phase; }, stop_propagation() {},
-    spawn(fn) { tasks.push(fn); },
+    spawn(fn, opts) { tasks.push(fn); spawns.push(opts); },
     timer: { every(ms, fn) { timers.push({ ms, fn }); }, after(ms, fn) { timers.push({ ms, fn, once: true }); } },
   };
   const api = {
@@ -128,7 +128,7 @@ export async function createHost({ nextCommand = () => new Promise(() => {}), mo
   const code = source.replace(/import[\s\S]*?from\s+"[^";]+";/g, "").replace("export function colors", "function colors").replace("export default class AgentQuota", "class AgentQuota");
   const AgentQuota = new Function(...Object.keys(deps), `${code}\nreturn AgentQuota;`)(...Object.values(deps));
   const view = new AgentQuota(); view.init(properties, cx);
-  return { view, cx, state, tasks, timers, overlays, commands, writes, reads, renders, sharedReads, properties, focus,
+  return { view, cx, state, tasks, spawns, timers, overlays, commands, writes, reads, renders, sharedReads, properties, focus,
     retire() { retired = true; },
     tree() {
       phase = "render";

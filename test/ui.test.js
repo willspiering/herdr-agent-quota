@@ -107,7 +107,7 @@ test("strip click opens the native dashboard window with saved options", async (
 test("agent navigation targets the correct terminal", async () => {
   const host = await createHost({ data, live: [{ address: "t9", space: "s", space_name: "Personal", tab_name: "Build", program: { key: "codex" }, status: "working" }] });
   click(host, `focus-${data.providers[0].key}-t9`);
-  assert.deepEqual(host.commands[0], ["agent.focus", { terminal: "t9" }]);
+  assert.deepEqual(host.commands.find(c => c[0] === "agent.focus"), ["agent.focus", { terminal: "t9" }]);
 });
 test("missing data renders an actionable empty state without a percentage", async () => {
   const host = await createHost();
@@ -152,7 +152,7 @@ test("the strip checks every 10 s and the dashboard only repaints its clock", as
   const strip = await createHost({ mode: "strip", data });
   assert.deepEqual(strip.timers.map(t => t.ms), [10000]);
   const dash = await createHost({ data });
-  assert.deepEqual(dash.timers.map(t => t.ms), [60000]);
+  assert.deepEqual(dash.timers.filter(t => !t.once).map(t => t.ms), [60000]);
 });
 // A host whose collector records each read and answers with a fresh report.
 async function reader(mode, live, extra = {}) {
@@ -181,16 +181,18 @@ test("an agent finishing its turn triggers a targeted read once the gap allows",
   host.timers[0].fn(host.cx); await settle();
   assert.equal(runs.length, 1); // served once, not again
 });
-test("opening the dashboard reads only data older than a minute", async () => {
-  const fresh = await reader("dashboard", []);
-  fresh.host.state[`${PREFIX}.control`] = { attempt: Date.now() - 30000, sweptAt: Date.now() };
-  await fresh.host.tasks[0](fresh.host.cx); await fresh.settle();
-  assert.equal(fresh.runs.length, 0);
-  const old = await reader("dashboard", []);
-  old.host.state[`${PREFIX}.control`] = { attempt: Date.now() - 90000, sweptAt: Date.now() };
-  await old.host.tasks[0](old.host.cx); await old.settle();
-  assert.equal(old.runs.length, 1);
-  assert.equal(old.host.state[`${PREFIX}.control`].reason, "look");
+test("opening the dashboard asks the strip to read data older than a minute", async () => {
+  const dash = await reader("dashboard", []);
+  assert.deepEqual(dash.host.commands.find(c => c[0].startsWith("agent-quota.")), ["agent-quota.look", undefined]);
+  assert.equal(dash.runs.length, 0); // the dashboard window does not read itself
+  for (const [age, reads] of [[30000, 0], [90000, 1]]) {
+    let sent = false;
+    const { host, runs, settle } = await reader("strip", [], { nextCommand: async () => (sent ? new Promise(() => {}) : (sent = true, "look")) });
+    host.state[`${PREFIX}.control`] = { attempt: Date.now() - age, sweptAt: Date.now() };
+    host.tasks[1](host.cx); await new Promise(r => setImmediate(r)); await settle();
+    assert.equal(runs.length, reads, `${age} ms old`);
+    if (reads) assert.equal(host.state[`${PREFIX}.control`].reason, "look");
+  }
 });
 test("a read in flight blocks a second one through shared control", async () => {
   const { host, runs } = await reader("strip", []);
@@ -202,12 +204,16 @@ test("a read in flight blocks a second one through shared control", async () => 
   assert.equal(host.tasks.length, 3); // still guarded by the shared timestamp
   assert.equal(runs.length, 0);
 });
-test("Refresh reads every provider and needs no shared write to ask", async () => {
-  const { host, runs, settle } = await reader("dashboard", [], { runtime: { overlay: "o1" } });
+test("Refresh asks the strip, which reads every provider; no shared write to ask", async () => {
+  const dash = await reader("dashboard", [], { runtime: { overlay: "o1" } });
+  dash.host.state[`${PREFIX}.control`] = { attempt: Date.now() - 20000, sweptAt: Date.now() };
+  find(dash.host.tree(), "refresh").events.click({}, dash.host.cx);
+  assert.ok(dash.host.commands.some(c => c[0] === "agent-quota.refresh"));
+  assert.equal(dash.host.writes.length, 0);
+  let sent = false;
+  const { host, runs, settle } = await reader("strip", [], { nextCommand: async () => (sent ? new Promise(() => {}) : (sent = true, "refresh")) });
   host.state[`${PREFIX}.control`] = { attempt: Date.now() - 20000, sweptAt: Date.now() };
-  find(host.tree(), "refresh").events.click({}, host.cx);
-  assert.ok(!host.writes.includes(`${PREFIX}.refresh`));
-  await settle();
+  host.tasks[1](host.cx); await new Promise(r => setImmediate(r)); await settle();
   assert.equal(runs.length, 1); assert.ok(!runs[0].includes("--provider"));
   assert.equal(host.state[`${PREFIX}.control`].reason, "manual");
 });
@@ -227,7 +233,7 @@ test("keyboard activation opens the dashboard and Escape closes it", async () =>
   assert.equal(host.overlays.length, 1);
   const dash = await createHost({ data, runtime: { overlay: "o1" } });
   dash.tree().events.keydown({ key: "escape" });
-  assert.deepEqual(dash.commands[0], ["close", "o1"]);
+  assert.deepEqual(dash.commands.find(c => c[0] === "close"), ["close", "o1"]);
 });
 test("rendering and repainting all surfaces never allocate focus handles", async () => {
   for (const mode of ["strip", "dashboard", "header"]) {
