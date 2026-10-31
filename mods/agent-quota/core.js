@@ -1,7 +1,17 @@
 // Pure data boundary. Only these allowlisted fields reach Herdr's shared state.
 export const PREFIX = "agent-quota.v1";
-export const POLL_MS = 120000;
-export const STALE_MS = 600000;
+// When to read quota. Agents finishing a turn drive reads; timers are only a backstop.
+export const CADENCE = {
+  gap: 60000,        // never closer together, however many agents finish
+  working: 180000,   // backstop while any agent works
+  idle: 600000,      // quota is also spent outside Herdr
+  look: 60000,       // opening the dashboard reads anything older
+  sweep: 3600000,    // every provider, to notice new sign-ins
+  discover: 3600000, // installed agents
+  retry: 60000,      // first retry after a failure, doubling to 10 minutes
+  manual: 10000,     // Refresh cooldown
+};
+export const STALE_MS = 900000;
 export const DEFAULTS = {
   hidden: [], kinds: { session: true, weekly: true, monthly: true, model: false, credits: true, unknown: true },
   windows: {}, signedOut: false, names: true, activeFirst: true,
@@ -93,6 +103,8 @@ export function parseReport(stdout, now = Date.now()) {
       status: text(p.state?.status, "unknown"), stale: p.state?.stale === true,
       at: refreshed !== null ? Math.min(refreshed, at) : at,
       reused: p.state?.reused === true, windows,
+      // quota-axi's own id, for targeted reads. Validated, never shell text.
+      axi: /^[a-z0-9][a-z0-9_-]{0,63}$/.test(p.provider) ? p.provider : null,
     });
   }
   return { schema: report.schemaVersion, at, providers };
@@ -185,4 +197,37 @@ export function ageLabel(at, now) {
   if (!at) return "Not read yet";
   const m = Math.max(0, Math.floor((now - at) / 60000));
   return m < 1 ? "Updated just now" : m < 60 ? `Updated ${m}m ago` : `Updated ${Math.floor(m / 60)}h ${m % 60}m ago`;
+}
+
+// Why to read quota now, or null. Pure: every input is passed in.
+export function schedule({ now, control = null, hasData = false, force = false, looking = false, working = false, finished = false, resetDue = false }) {
+  const since = now - (control?.attempt ?? 0), failures = control?.failures ?? 0;
+  if (force) return since >= CADENCE.manual ? "manual" : null;
+  if (failures) return since >= Math.min(600000, CADENCE.retry * 2 ** Math.min(failures - 1, 4)) ? "retry" : null;
+  if (!hasData) return "first";
+  if (since < CADENCE.gap) return null;
+  if (finished) return "turn";
+  if (resetDue) return "reset";
+  if (looking && since >= CADENCE.look) return "look";
+  return since >= (working ? CADENCE.working : CADENCE.idle) ? (working ? "working" : "idle") : null;
+}
+export function needsSweep(control, now, reason) {
+  return ["manual", "first", "retry"].includes(reason) || now - (control?.sweptAt ?? 0) >= CADENCE.sweep;
+}
+// A limit reset after the last reading, so the shown value is known to be old.
+export function resetDue(data, control, now) {
+  const last = control?.attempt ?? 0;
+  return (data?.providers ?? []).some(p => p.windows.some(w => w.resetsAt !== null && w.resetsAt > last && w.resetsAt <= now - 15000));
+}
+// Providers worth a routine read: anything with limits, or an agent installed or running here.
+export function targets(data, discovered = [], live = []) {
+  const wanted = new Set([...discovered.filter(a => a.installed).map(a => providerId(a.key)), ...live.map(activeProvider)]);
+  const ids = (data?.providers ?? []).filter(p => p.axi && (p.windows.length || wanted.has(p.id))).map(p => p.axi);
+  return ids.length ? [...new Set(ids)].sort() : null;
+}
+// A targeted read replaces only the providers it covers; a sweep replaces everything.
+export function mergeReport(previous, next, swept) {
+  if (swept || !previous) return next;
+  const read = new Set(next.providers.map(p => p.id));
+  return { ...next, providers: [...previous.providers.filter(p => !read.has(p.id)), ...next.providers] };
 }

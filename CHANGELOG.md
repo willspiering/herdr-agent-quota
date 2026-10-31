@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- Event-driven collection: read after an agent finishes a turn (at most once a
+  minute), on a limit reset, on opening a stale dashboard and on Refresh, with
+  3-minute (working) and 10-minute (idle) backstops. An idle day falls from 720
+  full reads to at most 145 targeted ones.
+- Routine reads cover only providers with limits or local agents (`--provider`,
+  0.07 s versus 0.6 s); every provider is swept hourly, on Refresh and after a
+  failure. Targeted results merge into the last sweep.
+- Pane headers schedule nothing. The strip's 10 s check is in memory; the
+  per-read lease write and the Refresh counter write are gone (each re-rendered
+  every mod in the window). Stale threshold is 15 minutes.
+- Tests: a simulated idle day and busy hour drive the real scheduler; a source
+  check requires `cx` in every endless loop and forbids timers under 10 s.
+
+- Fix: the strip's command loop never used `cx`, so a hot-reloaded build's loop
+  outlived its copy. One spun Herdr's main thread at 100% (sampled: a promise
+  job resuming endlessly). It now calls `cx.notify()` each turn, so Herdr ends
+  a retired loop, and it stops on a non-string command.
+- Fix: switch knobs had no element ID, so their slide animation could transfer
+  between switches when rows above them changed. Each page also keeps its own
+  scroll position.
+- Pane headers (one copy per pane) no longer read live agents or spaces; the
+  dashboard reads each once per render.
 - Terminal-styled redesign: monospace type, `──` section rules, and health
   colors from the theme's ANSI green/yellow/red (Classic palette optional).
 - Meters and gauges are painted natively, one path per color, replacing 41+

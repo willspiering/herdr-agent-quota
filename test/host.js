@@ -48,11 +48,11 @@ export function flatten(element) {
   if (typeof element === "string" || typeof element === "number") return String(element);
   return element?.nodes?.map(flatten).join(" ") ?? "";
 }
-export async function createHost({ mode = "dashboard", data = null, live = [], installed = [], paneList = [], spaceList = [], runtime = {}, runner } = {}) {
+export async function createHost({ nextCommand = () => new Promise(() => {}), mode = "dashboard", data = null, live = [], installed = [], paneList = [], spaceList = [], runtime = {}, runner } = {}) {
   const source = await readFile(new URL("../mods/agent-quota/main.js", import.meta.url), "utf8");
   const state = { [`${core.PREFIX}.data`]: data, [`${core.PREFIX}.discovered`]: installed };
   const properties = { mode, ...runtime };
-  const tasks = [], timers = [], overlays = [], commands = [], writes = [];
+  const tasks = [], timers = [], overlays = [], commands = [], writes = [], reads = { agents: 0, spaces: 0 };
   let phase = "init";
   const focus = { allocations: 0 };
   const cx = {
@@ -65,16 +65,16 @@ export async function createHost({ mode = "dashboard", data = null, live = [], i
   };
   const api = {
     exec: runner ?? (async () => { throw Error("Not installed"); }), appHome: () => "/preview", readTextFile: async () => null,
-    knownAgents: async () => installed, agents: () => live, spaces: () => spaceList, panes: () => paneList,
+    knownAgents: async () => installed, agents: () => (reads.agents++, live), spaces: () => (reads.spaces++, spaceList), panes: () => paneList,
     theme: () => palette, settings: () => ({ dark: true, font_family: "JetBrains Mono" }), shared: name => state[name], setShared: (name, value) => { writes.push(name); state[name] = value; },
     props: () => properties, openOverlay: spec => { overlays.push(spec); return "overlay"; }, closeOverlay: id => commands.push(["close", id]),
-    nextCommand: () => new Promise(() => {}), run: (name, args) => commands.push([name, args]),
+    nextCommand, run: (name, args) => commands.push([name, args]),
   };
   const deps = { ...constructors, ...api, ...core, ...collector };
   const code = source.replace(/import[\s\S]*?from\s+"[^";]+";/g, "").replace("export function colors", "function colors").replace("export default class AgentQuota", "class AgentQuota");
   const AgentQuota = new Function(...Object.keys(deps), `${code}\nreturn AgentQuota;`)(...Object.values(deps));
   const view = new AgentQuota(); view.init(properties, cx);
-  return { view, cx, state, tasks, timers, overlays, commands, writes, properties, focus, tree() {
+  return { view, cx, state, tasks, timers, overlays, commands, writes, reads, properties, focus, tree() {
     phase = "render";
     try { return view.render(cx); } finally { phase = "event"; }
   } };

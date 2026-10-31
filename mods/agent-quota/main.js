@@ -7,8 +7,9 @@ import {
 import {
   PREFIX, options, providerId, catalog, visibleWindows, shows, reading, windowState,
   elapsed, pace, resetLabel, shortLabel, redlines, ageLabel, remoteAgent, QuotaError,
+  CADENCE, schedule, needsSweep, resetDue, targets, mergeReport,
 } from "./core.js";
-import { collect, canCollect } from "./collector.js";
+import { collect } from "./collector.js";
 
 const key = suffix => `${PREFIX}.${suffix}`;
 /** @returns {any} Application-owned, normalized shared state. */
@@ -22,6 +23,9 @@ const STATE_LABEL = { working: "Working", blocked: "Needs you", done: "Finished"
 const STATE_MARK = { working: "●", blocked: "▲", done: "✓", idle: "○" };
 const ICONS = { claude: "claude", codex: "codex", grok: "grok", cursor: "cursor", copilot: "copilot", kimi: "kimi" };
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+// One read at a time per runtime; quota-axi also merges simultaneous reads across processes.
+// A timestamp, not a flag: a task cancelled when its copy closes can't wedge later reads.
+let inFlight = 0;
 const CLASSIC = { dark: ["#80c9ae", "#e1bc75", "#f48e83"], light: ["#226b50", "#79530c", "#ad302d"] };
 
 // Health follows the terminal's own ANSI green/yellow/red unless the classic palette is chosen.
@@ -59,17 +63,23 @@ export default class AgentQuota extends View {
     this.keys = cx.focus_handle();
     this.runtime = {};
     this.pending = false;
-    this.nextAsk = get("refresh") ?? 0;
-    cx.spawn(async cx => {
+    this.statuses = null;
+    this.finishedAt = 0;
+    // Pane headers, one per pane, only display. The strip schedules reads; the dashboard reads
+    // when opened. The 10 s check is in-memory: it runs a read only when one is due.
+    if (this.mode !== "header") cx.spawn(async cx => {
       try { this.runtime = JSON.parse(await readTextFile(`${appHome()}/mods/agent-quota/runtime.json`) || "{}"); } catch { /* PATH fallback */ }
-      this.tick(cx);
+      this.tick(cx, { looking: this.mode === "dashboard" });
     });
-    // No animation polling. Pane headers only back up the strip; all copies share one lease.
-    cx.timer.every(this.mode === "header" ? 60000 : 15000, cx => this.tick(cx));
+    if (this.mode === "strip") cx.timer.every(10000, cx => this.tick(cx));
     if (this.mode === "dashboard") cx.timer.every(60000, cx => cx.notify());
     if (this.mode === "strip") cx.spawn(async cx => {
       for (;;) {
         const command = await nextCommand();
+        // Herdr ends a replaced build's loop at its next cx use; without one, a retired
+        // copy whose nextCommand() resolves at once would spin the main thread forever.
+        cx.notify();
+        if (typeof command !== "string") return;
         if (command === "menu" || command === "open") this.open();
         if (command === "settings") this.open(null, "configure");
         if (command === "refresh") this.refresh(cx);
@@ -82,14 +92,16 @@ export default class AgentQuota extends View {
     const current = this.opts(), next = { ...current, ...change };
     if (JSON.stringify(options(props()?.start ?? props() ?? {}, next)) !== JSON.stringify(current)) put("options", next);
   }
-  all() { return catalog(get("data"), get("discovered") ?? [], agents(), spaces(), this.opts()); }
-  // Everything one render needs, computed once rather than per gauge or row.
+  // Everything one render needs, computed once rather than per gauge or row. Pane headers,
+  // one copy per pane, read only their provider's limits, so they skip live agents and spaces.
   frame() {
-    const o = this.opts(), all = this.all();
+    const o = this.opts(), header = this.mode === "header";
+    const live = header ? [] : agents(), places = header ? [] : spaces();
+    const all = catalog(get("data"), get("discovered") ?? [], live, places, o);
     // Overview lists what can be read or acted on; Settings lists everything.
     const useful = p => p.windows.length || p.sessions.length || p.status === "auth_required" || o.signedOut;
     return { o, all, shown: all.filter(p => !o.hidden.includes(p.id) && useful(p)), now: Date.now(), failed: Boolean(get("error")),
-      spaces: spaces(), t: colors(theme(), settings().dark !== false, o.palette), mono: settings().font_family ?? "JetBrains Mono" };
+      agents: live, spaces: places, t: colors(theme(), settings().dark !== false, o.palette), mono: settings().font_family ?? "JetBrains Mono" };
   }
   state(w, p) { return windowState(w, p, this.f.now, this.f.failed); }
 
@@ -102,37 +114,55 @@ export default class AgentQuota extends View {
     cx.spawn(async cx => cx.notify());
   }
 
-  refresh(cx) { put("refresh", (get("refresh") ?? 0) + 1); this.tick(cx); }
+  refresh(cx) { this.tick(cx, { force: true }); }
 
-  tick(cx) {
-    const now = Date.now(), control = get("control");
-    const ask = get("refresh") ?? 0;
-    const force = ask !== this.nextAsk;
-    if (this.pending || !canCollect(control, now, force)) return;
-    this.nextAsk = ask;
+  // A turn has finished when an agent that was working no longer is (or has gone).
+  observe(now) {
+    const live = agents(), next = new Map(live.map(a => [a.address, a.status]));
+    if (this.statuses) for (const [address, status] of this.statuses) {
+      if (status === "working" && next.get(address) !== "working" && !this.finishedAt) this.finishedAt = now;
+    }
+    this.statuses = next;
+    return live;
+  }
+
+  tick(cx, { force = false, looking = false } = {}) {
+    const now = Date.now(), control = get("control") ?? null, data = get("data") ?? null;
+    const live = this.mode === "strip" ? this.observe(now) : agents();
+    if (this.finishedAt && this.finishedAt <= (control?.attempt ?? 0)) this.finishedAt = 0;
+    if (this.pending || now - inFlight < 45000) return;
+    const reason = schedule({ now, control, hasData: Boolean(data), force, looking,
+      working: live.some(a => a.status === "working"), finished: this.finishedAt > 0, resetDue: resetDue(data, control, now) });
+    if (!reason) return;
+    const sweep = needsSweep(control, now, reason);
+    const ids = sweep ? null : targets(data, get("discovered") ?? [], live);
     this.pending = true;
-    put("control", { ...control, owner: this.id, attempt: now, until: now + 45000 });
+    inFlight = now;
+    if (force || looking) cx.notify();
     cx.spawn(async cx => {
+      const next = { attempt: now, failures: 0, sweptAt: control?.sweptAt ?? 0, discoveredAt: control?.discoveredAt ?? 0, reason };
       try {
-        if (now - (get("discoveryAt") ?? 0) > 300000) {
+        if (now - next.discoveredAt >= CADENCE.discover || reason === "manual") {
           try {
             const list = await knownAgents();
             put("discovered", list.map(a => ({ key: a.key, name: a.name, icon: a.icon, tint: a.tint, installed: a.installed })));
-            put("discoveryAt", now);
+            next.discoveredAt = now;
           } catch { /* quota still works when discovery fails */ }
         }
-        const report = await collect(exec, this.runtime);
-        if (get("control")?.owner !== this.id) return;
-        put("data", report);
+        const { report, swept } = await collect(exec, this.runtime, Date.now(), ids);
+        put("data", mergeReport(get("data"), report, swept));
+        if (swept) next.sweptAt = now;
         put("error", null);
-        put("control", { owner: this.id, attempt: now, until: 0, failures: 0 });
       } catch (e) {
-        if (get("control")?.owner === this.id) {
-          // Only this mod's own messages are kept; anything else could echo subprocess output.
-          put("error", e instanceof QuotaError ? e.message.slice(0, 160) : GENERIC_ERROR);
-          put("control", { owner: this.id, attempt: now, until: 0, failures: (control?.failures ?? 0) + 1 });
-        }
-      } finally { this.pending = false; cx.notify(); }
+        // Only this mod's own messages are kept; anything else could echo subprocess output.
+        put("error", e instanceof QuotaError ? e.message.slice(0, 160) : GENERIC_ERROR);
+        next.failures = (control?.failures ?? 0) + 1;
+      } finally {
+        put("control", next);
+        this.pending = false;
+        inFlight = 0;
+        cx.notify();
+      }
     });
   }
 
@@ -171,7 +201,7 @@ export default class AgentQuota extends View {
         .child(label(title, 12, t.foreground))
         .when(Boolean(hint), el => el.child(label(hint, 11, t.muted).truncate())))
       .child(div().relative().w(30).h(16).flex_none().rounded(8).bg(on ? t.accent : t.border)
-        .child(div().absolute().top(2).left(on ? 16 : 2).size(12).rounded(6).bg(on ? t.accent_foreground ?? t.popover : t.muted)
+        .child(div().id(`${id}-knob`).absolute().top(2).left(on ? 16 : 2).size(12).rounded(6).bg(on ? t.accent_foreground ?? t.popover : t.muted)
           .transition("left", { duration: 120, easing: "ease-out" })));
   }
 
@@ -460,7 +490,7 @@ export default class AgentQuota extends View {
       }))
       .child(this.section("── about this data", t))
       .child(v_flex().px(10).gap(4)
-        .child(label("Refreshes every 2 minutes with one shared collector, backing off after failures. Makes no inference requests.", 11, t.muted))
+        .child(label("Reads after an agent finishes a turn (at most once a minute), every 3 minutes while agents work, and every 10 minutes otherwise. Never makes inference requests.", 11, t.muted))
         .child(label("Reads local CLI sign-ins through quota-axi. Stores only percentages, reset times and your choices here.", 11, t.muted))
         .child(label("Token counts are unavailable unless a provider reports them.", 11, t.muted)));
   }
@@ -470,8 +500,8 @@ export default class AgentQuota extends View {
     const selected = props()?.provider;
     const list = selected ? shown.filter(p => p.id === selected) : shown;
     const lines = redlines(shown, o, now, failed);
-    const busy = (get("control")?.until ?? 0) > now;
-    const count = agents().length;
+    const busy = this.pending;
+    const count = this.f.agents.length;
     const toSettings = (_e, cx) => { this.page = "configure"; cx.notify(); };
     const body = this.page === "configure" ? this.configure() : v_flex()
       .when(Boolean(selected), el => el.child(h_flex().pt(14).child(this.button("show-all", "← All providers", () => this.open(), t, { small: true }))))
@@ -490,7 +520,7 @@ export default class AgentQuota extends View {
       .child(h_flex().px(24).pt(18).pb(12).gap(8).items_center().flex_none()
         .child(v_flex().gap(4).flex_1().min_w(0)
           .child(label("Agent quota", 17, t.foreground).font_semibold())
-          .child(label(`${count} ${count === 1 ? "agent" : "agents"} · ${spaces().length} spaces · ${ageLabel(get("data")?.at, now).toLowerCase()}`, 11, t.muted).truncate()))
+          .child(label(`${count} ${count === 1 ? "agent" : "agents"} · ${this.f.spaces.length} spaces · ${ageLabel(get("data")?.at, now).toLowerCase()}`, 11, t.muted).truncate()))
         .child(this.button("refresh", busy ? "Refreshing" : "↻ Refresh", (_e, cx) => this.refresh(cx), t, { a11y: busy ? "Refreshing quota" : "Refresh quota" })
           .when(busy, el => el.child(div().w(10).text_color(t.muted).frames(SPINNER, 90).child(SPINNER[0]))))
         .when(Boolean(props()?.overlay), el => el.child(this.button("close", "✕", () => this.close(), t, { a11y: "Close" }))))
@@ -499,7 +529,7 @@ export default class AgentQuota extends View {
         .child(div().flex_1())
         .child(label(`redline ${o.redline}%`, 11, t.redline)))
       .child(rule(t))
-      .child(v_flex().id("quota-scroll").flex_1().min_h(0).px(24).overflow_y_scrollbar()
+      .child(v_flex().id(`quota-scroll-${this.page}`).flex_1().min_h(0).px(24).overflow_y_scrollbar()
         .when(failed, el => el.child(v_flex().mt(14).px(12).py(10).gap(4).rounded(4).border(1).border_color(t.warning)
           .child(label("Quota needs attention", 12, t.warning).font_medium())
           .child(label(get("error"), 11, t.foreground))

@@ -49,9 +49,15 @@ One mod, `mods/agent-quota`, with `place: none`. The same View renders strip,
 dashboard or optional header using `props().mode`. Use Herdr's `knownAgents`,
 `agents`, `spaces` and `panes`; never scrape terminals. `core.js` handles
 quota schema 3–5, account lanes, visibility, activity ranking and freshness.
-`collector.js` executes quota-axi. A shared 45-second lease prevents duplicate
-reads across copies. Normal quota reads are every 120 seconds, discovery
-every 300 seconds, and failures back off to 600 seconds. Paint meters
+`collector.js` executes quota-axi. Only the strip schedules reads: an in-memory
+check every 10 s compares agent statuses and runs `quota-axi` only when
+`schedule()` in `core.js` says one is due. Triggers: an agent finishing a turn
+(working → anything else), a limit reset passing, the dashboard opening on
+data over 60 s old, Refresh, a 3-minute backstop while any agent works and a
+10-minute one otherwise. Reads are at least 60 s apart; failures back off from
+60 s to 10 minutes. Routine reads pass `--provider` for providers with limits
+or local agents (0.07 s versus 0.6 s for all 19); every provider is swept
+hourly, on Refresh and after a failure. Pane headers only display. Paint meters
 with `window.paint_path` and `PathBuilder.fill().add_polygon`, one path per
 color. Use native motion (`frames`, `transition`); no animation polling.
 
@@ -61,6 +67,11 @@ headers or name collisions. Runtime paths are generated separately, never
 hardcoded to a particular user's home.
 
 ## Watch out
+
+Test with as few hot reloads as possible. On Herdr 0.1.10 each reload leaves
+QuickJS JIT feedback behind; after ~20 reloads its maintenance pass dominated
+every render and pinned the main thread at 100%. Measure performance only after
+a window restart. Every `for (;;)` in a task must use `cx` each turn.
 
 `on_size_change` runs during layout; a `cx.notify()` there re-renders inside
 layout and Herdr interrupts it (`could not be re-rendered · interrupted`).

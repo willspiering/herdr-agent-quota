@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseReport, options, windowState, catalog, redlines, pace, elapsed, resetLabel, shortLabel, visibleWindows, reading, QuotaError } from "../mods/agent-quota/core.js";
-import { collect, canCollect } from "../mods/agent-quota/collector.js";
+import { parseReport, options, windowState, catalog, redlines, pace, elapsed, resetLabel, shortLabel, visibleWindows, reading, QuotaError, CADENCE, STALE_MS, schedule, needsSweep, resetDue, targets, mergeReport } from "../mods/agent-quota/core.js";
+import { collect } from "../mods/agent-quota/collector.js";
 import { integrateLayout } from "../scripts/layout.mjs";
 
 const now = Date.parse("2026-10-30T20:00:00Z");
@@ -47,7 +47,8 @@ test("expired, untrusted, share and stale never count as healthy headroom", () =
   assert.equal(windowState(w, p, now), "fresh");
   assert.equal(windowState(w, p, now, true), "stale");
   assert.equal(windowState(w, { ...p, stale: true }, now), "stale");
-  assert.equal(windowState(w, p, now + 600001), "stale");
+  assert.equal(windowState(w, p, now + STALE_MS + 1), "stale");
+  assert.ok(STALE_MS > CADENCE.idle); // an idle reading is never stale before the next one
   assert.equal(windowState({ ...w, resetsAt: now }, p, now), "reset");
   assert.equal(windowState({ ...w, trusted: false }, p, now), "untrusted");
   assert.equal(windowState({ ...w, shareOf: "monthly" }, p, now), "share");
@@ -105,20 +106,95 @@ test("saved choices override props without dropping other defaults", () => {
 test("collector accepts exit 1 reports and does not repeat provider calls", async () => {
   let calls = 0;
   const result = await collect(async () => { calls++; return { code: 1, stdout: JSON.stringify(report()), stderr: "SECRET" }; }, {}, now);
-  assert.equal(result.providers.length, 1); assert.equal(calls, 1);
+  assert.equal(result.report.providers.length, 1); assert.equal(calls, 1); assert.equal(result.swept, true);
 });
 test("collector PATH recovery uses only constant shell text", async () => {
   const calls = [];
   const data = await collect(async (cmd, args) => { calls.push([cmd, args]); if (cmd === "quota-axi") throw Error("SECRET"); return { code: 0, stdout: JSON.stringify(report()) }; }, {}, now);
-  assert.equal(data.providers.length, 1); assert.equal(calls.length, 2); assert.equal(calls[1][0], "sh");
+  assert.equal(data.report.providers.length, 1); assert.equal(calls.length, 2); assert.equal(calls[1][0], "sh");
   assert.ok(calls[1][1][1].includes("--no-credential-refresh"));
 });
-test("busy leases, manual cooldown and exponential backoff bound collection", () => {
-  assert.equal(canCollect({ until: now + 1000 }, now, true), false);
-  assert.equal(canCollect({ attempt: now - 1000, failures: 0 }, now, true), false);
-  assert.equal(canCollect({ attempt: now - 11000, failures: 3 }, now, true), true);
-  assert.equal(canCollect({ attempt: now - 300000, failures: 2 }, now), false);
-  assert.equal(canCollect({ attempt: now - 600001, failures: 3 }, now), true);
+test("targeted reads pass ids as one argv element; the shell fallback never sees them", async () => {
+  const calls = [];
+  const runner = async (cmd, args) => { calls.push([cmd, args]); if (cmd !== "sh") throw Error("missing"); return { code: 0, stdout: JSON.stringify(report()) }; };
+  const result = await collect(runner, { node: "/n", collector: "/c" }, now, ["claude", "codex"]);
+  assert.deepEqual(calls[0][1].slice(-2), ["--provider", "claude,codex"]);
+  assert.deepEqual(calls[1][1].slice(-2), ["--provider", "claude,codex"]);
+  assert.doesNotMatch(calls[2][1][1], /claude|codex/);
+  assert.equal(result.swept, true); // the fallback read everything
+  const plain = []; await collect(async (cmd, args) => { plain.push(args); return { code: 0, stdout: JSON.stringify(report()) }; }, {}, now, ["bad id;rm"]);
+  assert.ok(!plain[0].includes("--provider")); // invalid ids fall back to a full read
+});
+test("the scheduler reads after a turn, never closer than a minute", () => {
+  const control = { attempt: now - 30000 };
+  assert.equal(schedule({ now, control, hasData: true, finished: true }), null);
+  assert.equal(schedule({ now: now + 30000, control, hasData: true, finished: true }), "turn");
+  assert.equal(schedule({ now, control: { attempt: now - 5000 }, hasData: true, force: true }), null);
+  assert.equal(schedule({ now, control: { attempt: now - 11000 }, hasData: true, force: true }), "manual");
+  assert.equal(schedule({ now, control: null, hasData: false }), "first");
+});
+test("the scheduler backs off after failures and then sweeps", () => {
+  const at = f => schedule({ now, control: { attempt: now - f[1], failures: f[0] }, hasData: true, finished: true });
+  assert.equal(at([1, 59000]), null); assert.equal(at([1, 60000]), "retry");
+  assert.equal(at([3, 239000]), null); assert.equal(at([3, 240000]), "retry");
+  assert.equal(at([9, 599000]), null); assert.equal(at([9, 600000]), "retry");
+  assert.equal(needsSweep({ sweptAt: now }, now, "retry"), true);
+  assert.equal(needsSweep({ sweptAt: now - 1000 }, now, "turn"), false);
+  assert.equal(needsSweep({ sweptAt: now - CADENCE.sweep }, now, "idle"), true);
+});
+// Drive the real scheduler at the strip's 10 s check for a simulated period.
+function simulate({ hours, working = () => false, finishes = () => false }) {
+  let control = { attempt: 0 }, finishedAt = 0, reads = [];
+  for (let t = now; t < now + hours * 3600000; t += 10000) {
+    if (finishes(t)) finishedAt ||= t;
+    if (finishedAt && finishedAt <= control.attempt) finishedAt = 0;
+    const reason = schedule({ now: t, control, hasData: true, working: working(t), finished: finishedAt > 0 });
+    if (reason) { reads.push([t, reason]); control = { attempt: t }; }
+  }
+  return reads;
+}
+test("an idle day costs at most 145 reads, not 720", () => {
+  const reads = simulate({ hours: 24 });
+  assert.ok(reads.length <= 145, `${reads.length}`);
+  assert.ok(reads.every(([, r]) => r === "idle"));
+});
+test("a busy hour is bounded by the one-minute gap and serves every finished turn", () => {
+  // Ten agents finishing a turn every 20 seconds between them.
+  const reads = simulate({ hours: 1, working: () => true, finishes: t => (t - now) % 20000 === 0 });
+  assert.ok(reads.length <= 61, `${reads.length}`);
+  for (let i = 1; i < reads.length; i++) assert.ok(reads[i][0] - reads[i - 1][0] >= CADENCE.gap);
+});
+test("a finished turn is read within the next check once the gap allows", () => {
+  // Finishes 3 s after a check, 10 s after a backstop read: the worst case for both.
+  const done = now + 15 * 60000 + 13000;
+  const reads = simulate({ hours: 1, working: () => true, finishes: t => t >= done && t < done + 10000 });
+  const turn = reads.find(([, r]) => r === "turn");
+  assert.ok(turn && turn[0] - done <= CADENCE.gap + 10000, `${turn && turn[0] - done}`);
+});
+test("a long working turn still gets a reading every three minutes", () => {
+  const reads = simulate({ hours: 1, working: () => true });
+  assert.ok(reads.length >= 19 && reads.length <= 21, `${reads.length}`);
+});
+test("a limit that reset since the last reading is due", () => {
+  const data = parse(report());
+  const w = data.providers[0].windows[0];
+  assert.equal(resetDue(data, { attempt: w.resetsAt - 1000 }, w.resetsAt + 20000), true);
+  assert.equal(resetDue(data, { attempt: w.resetsAt + 1000 }, w.resetsAt + 20000), false); // already read since
+  assert.equal(resetDue(data, { attempt: w.resetsAt - 1000 }, w.resetsAt + 5000), false);  // give the vendor 15 s
+});
+test("targets cover providers with limits or local agents, never unknown ids", () => {
+  const data = parse(report([provider(), provider({ provider: "cursor", windows: [] }), provider({ provider: "grok", windows: [] })]));
+  assert.deepEqual(targets(data, [], []), ["codex"]);
+  assert.deepEqual(targets(data, [{ key: "cursor", installed: true }], [{ program: { key: "grok" } }]), ["codex", "cursor", "grok"]);
+  assert.equal(targets(null, [], []), null);
+});
+test("a targeted read replaces only what it read", () => {
+  const before = parse(report([provider(), provider({ provider: "claude" })]));
+  const after = parse(report([provider({ windows: [window({ percentRemaining: 5 })] })]));
+  const merged = mergeReport(before, after, false);
+  assert.equal(merged.providers.length, 2);
+  assert.equal(merged.providers.find(p => p.id === "codex").windows[0].percentUsed, 95);
+  assert.equal(mergeReport(before, after, true).providers.length, 1);
 });
 test("layout integration keeps the existing status and is idempotent", () => {
   const source = { id: "root", type: "column", children: [{ id: "status", type: "block", size: { px: 28 }, content: { mod: "workspace-status" } }] };

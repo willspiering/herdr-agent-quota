@@ -112,20 +112,82 @@ test("pane header suppresses local readings for a remote terminal", async () => 
   const text = flatten(host.tree());
   assert.match(text, /remote · quota not linked/); assert.doesNotMatch(text, /78%/);
 });
-test("pane headers poll less often than the strip", async () => {
-  const header = await createHost({ mode: "header", data, runtime: { pane: "p1" } });
-  const strip = await createHost({ mode: "strip", data });
-  assert.equal(header.timers[0].ms, 60000); assert.equal(strip.timers[0].ms, 15000);
+test("pane headers schedule nothing: no timers, no tasks, no reads", async () => {
+  const runs = [];
+  const host = await createHost({ mode: "header", data, runtime: { pane: "p1" }, runner: async (...c) => { runs.push(c); return { code: 0, stdout: "" }; } });
+  assert.equal(host.timers.length, 0); assert.equal(host.tasks.length, 0);
+  host.tree(); assert.equal(runs.length, 0);
 });
-test("two surfaces compete for one collection lease", async () => {
-  const a = await createHost({ data }), b = await createHost({ data });
-  const old = a.state[`${PREFIX}.control`];
-  a.view.tick(a.cx);
-  b.state[`${PREFIX}.control`] = a.state[`${PREFIX}.control`];
-  b.view.tick(b.cx);
-  assert.equal(a.tasks.length, 2); // initialization and one collection task
-  assert.equal(b.tasks.length, 1); // initialization only
-  assert.notDeepEqual(a.state[`${PREFIX}.control`], old);
+test("the strip checks every 10 s and the dashboard only repaints its clock", async () => {
+  const strip = await createHost({ mode: "strip", data });
+  assert.deepEqual(strip.timers.map(t => t.ms), [10000]);
+  const dash = await createHost({ data });
+  assert.deepEqual(dash.timers.map(t => t.ms), [60000]);
+});
+// A host whose collector records each read and answers with a fresh report.
+async function reader(mode, live, extra = {}) {
+  const runs = [];
+  const runner = async (cmd, args) => { runs.push(args); return { code: 0, stdout: JSON.stringify({ schemaVersion: 5, generatedAt: new Date().toISOString(), providers: [{ provider: "codex", state: { status: "fresh" }, windows: [] }] }) }; };
+  const host = await createHost({ mode, data, live, runner, ...extra });
+  host.view.runtime = { node: "/node", collector: "/quota-axi" };
+  return { host, runs, settle: async () => { while (host.tasks.length > (mode === "strip" ? 2 : 1)) await host.tasks.splice(-1)[0](host.cx); } };
+}
+test("an agent finishing its turn triggers a targeted read once the gap allows", async () => {
+  const live = [{ address: "t1", space: "s", program: { key: "codex" }, status: "working" }];
+  const { host, runs, settle } = await reader("strip", live);
+  host.state[`${PREFIX}.control`] = { attempt: Date.now() - 30000, sweptAt: Date.now() };
+  host.timers[0].fn(host.cx); await settle();
+  assert.equal(runs.length, 0); // working, read 30 s ago: nothing due
+  live[0].status = "idle";
+  host.timers[0].fn(host.cx); await settle();
+  assert.equal(runs.length, 0); // finished, but inside the one-minute gap
+  host.state[`${PREFIX}.control`] = { attempt: Date.now() - 61000, sweptAt: Date.now() };
+  host.timers[0].fn(host.cx); await settle();
+  assert.equal(runs.length, 1);
+  assert.deepEqual(runs[0].slice(-2), ["--provider", "codex"]);
+  assert.equal(host.state[`${PREFIX}.control`].reason, "turn");
+  host.timers[0].fn(host.cx); await settle();
+  assert.equal(runs.length, 1); // served once, not again
+});
+test("opening the dashboard reads only data older than a minute", async () => {
+  const fresh = await reader("dashboard", []);
+  fresh.host.state[`${PREFIX}.control`] = { attempt: Date.now() - 30000, sweptAt: Date.now() };
+  await fresh.host.tasks[0](fresh.host.cx); await fresh.settle();
+  assert.equal(fresh.runs.length, 0);
+  const old = await reader("dashboard", []);
+  old.host.state[`${PREFIX}.control`] = { attempt: Date.now() - 90000, sweptAt: Date.now() };
+  await old.host.tasks[0](old.host.cx); await old.settle();
+  assert.equal(old.runs.length, 1);
+  assert.equal(old.host.state[`${PREFIX}.control`].reason, "look");
+});
+test("a read in flight blocks a second one, and the guard expires", async () => {
+  const { host, runs } = await reader("strip", []);
+  host.state[`${PREFIX}.control`] = null;
+  host.timers[0].fn(host.cx); host.timers[0].fn(host.cx);
+  assert.equal(host.tasks.length, 3); // init, command loop, one read
+  host.view.pending = false; // as if the copy's task was cancelled mid-read
+  host.timers[0].fn(host.cx);
+  assert.equal(host.tasks.length, 3); // still guarded by the shared timestamp
+  assert.equal(runs.length, 0);
+});
+test("Refresh reads every provider and needs no shared write to ask", async () => {
+  const { host, runs, settle } = await reader("dashboard", [], { runtime: { overlay: "o1" } });
+  host.state[`${PREFIX}.control`] = { attempt: Date.now() - 20000, sweptAt: Date.now() };
+  find(host.tree(), "refresh").events.click({}, host.cx);
+  assert.ok(!host.writes.includes(`${PREFIX}.refresh`));
+  await settle();
+  assert.equal(runs.length, 1); assert.ok(!runs[0].includes("--provider"));
+  assert.equal(host.state[`${PREFIX}.control`].reason, "manual");
+});
+test("every endless loop yields to Herdr through cx, and nothing uses browser timers", async () => {
+  const source = await (await import("node:fs/promises")).readFile(new URL("../mods/agent-quota/main.js", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /\b(setTimeout|setInterval|while \(true\))/);
+  for (const match of source.matchAll(/for \(;;\) \{/g)) {
+    let depth = 0, i = match.index + match[0].length - 1;
+    do { if (source[i] === "{") depth++; else if (source[i] === "}") depth--; i++; } while (depth);
+    assert.match(source.slice(match.index, i), /\bcx\.(notify|spawn)\(/, "a for (;;) body must use cx");
+  }
+  for (const m of source.matchAll(/timer\.every\((\d+)/g)) assert.ok(Number(m[1]) >= 10000, `timer at ${m[1]} ms`);
 });
 test("keyboard activation opens the dashboard and Escape closes it", async () => {
   const host = await createHost({ mode: "strip", data });
@@ -150,4 +212,40 @@ test("rendering and repainting all surfaces never allocate focus handles", async
     }
     assert.equal(host.focus.allocations, allocations, mode);
   }
+});
+test("pane headers never read live agents or spaces", async () => {
+  const host = await createHost({ mode: "header", data, runtime: { pane: "p1" }, paneList: [{ pane: "p1", terminal: "t1", program: { key: "codex", name: "Codex", agent: true } }] });
+  host.tree(); host.tree();
+  assert.deepEqual(host.reads, { agents: 0, spaces: 0 });
+  assert.match(flatten(host.tree()), /78%/);
+});
+test("a dashboard render reads live agents and spaces once", async () => {
+  const host = await createHost({ data });
+  host.tree();
+  assert.deepEqual(host.reads, { agents: 1, spaces: 1 });
+});
+test("animated switch knobs keep identity when rows above them change", async () => {
+  const host = await createHost({ data });
+  host.view.page = "configure";
+  const knobs = [];
+  walk(host.tree(), n => { if (n.styles.transition) knobs.push(n.styles.id?.[0]); });
+  assert.ok(knobs.length >= 3);
+  assert.ok(knobs.every(id => typeof id === "string" && id.endsWith("-knob")));
+});
+test("each page keeps its own scroll position", async () => {
+  const host = await createHost({ data });
+  assert.ok(find(host.tree(), "quota-scroll-overview"));
+  host.view.page = "configure";
+  assert.ok(find(host.tree(), "quota-scroll-configure"));
+});
+test("the command loop yields to Herdr and stops when commands end", async () => {
+  let calls = 0, notified = 0;
+  const host = await createHost({ mode: "strip", data, nextCommand: async () => (++calls === 1 ? "open" : undefined) });
+  host.cx.notify = () => { notified++; };
+  await host.tasks[1](host.cx); // must return rather than spin
+  assert.equal(calls, 2); assert.equal(host.overlays.length, 1); assert.equal(notified, 2);
+  // A retired copy's cx throws on use, which ends the loop even if commands keep coming.
+  const retired = await createHost({ mode: "strip", data, nextCommand: async () => "noop" });
+  retired.cx.notify = () => { throw new Error("view released"); };
+  await assert.rejects(retired.tasks[1](retired.cx), /released/);
 });

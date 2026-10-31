@@ -41,6 +41,41 @@ theme), with the build installed into the existing local trial:
   installed), clicking controls natively (no pointer automation was used),
   light theme, zoom, narrow widths and restart persistence.
 
+## Performance pass, 2026-10-30
+
+A temporary instrumented build timed every render on the live app while many
+agents ran. Over ~1 minute with Settings open: Settings 1.7 ms (0.4 ms data),
+strip 1.0 ms, each of 7 pane headers 0.4 ms; each copy rendered 0–1 times idle.
+A fresh `quota-axi` read of all providers took 0.64 s wall time.
+The 5 s timers fired about every 7.5 s, indicating general script-thread load.
+
+After repeated hot reloads during testing, the Herdr window hung at 100% CPU.
+A `sample` of the main thread showed it inside `JS_ExecutePendingJob` resuming
+one async function in a hot loop, matching the strip's `cx`-free command loop.
+That loop is fixed. Reverting the installed file did not unhang it; the window
+recovered by itself within minutes without a restart, and why it stopped is
+unconfirmed. Afterwards the main thread sampled idle and the fixed build was
+running. Terminals in herdr-core stayed live throughout.
+
+## Collection and runtime pass, 2026-10-30
+
+- A targeted read (`--provider codex,claude,copilot`) took 0.07 s against 0.6 s
+  for all 19 providers, returning fresh readings for each.
+- Installing this build into a window that had hot-reloaded the mod ~20 times
+  pinned Herdr's main thread at ~100%. Bisection: an empty stub mod returned it
+  to ~12%; stubbing every render (keeping `init`) or removing the command loop
+  did not. `sample` showed all main-thread time in one render, inside an
+  `Array.find` callback, in `rquickjs_jit::maintenance` building feedback
+  snapshots. The previous round's hang showed the same `record_hot →
+  maintenance_if_due` path. Conclusion: JIT state accumulated across reloads
+  (a Herdr runtime issue made worse by test churn), not a loop in this mod.
+- After a graceful window restart (all 7 terminals stayed live), the same build
+  measured 7–8% CPU with no JIT maintenance frames; the startup read was a
+  targeted `working` read with no error.
+- Protocol from now on: unit and host tests first; one ordered install
+  (`core`, `collector`, then `main`); `herdr-app check`; then measure only on a
+  freshly restarted window, without further reloads.
+
 ## Open issues
 
 - Remote account quota and absolute token-count telemetry are not implemented.
