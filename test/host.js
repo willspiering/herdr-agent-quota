@@ -18,7 +18,12 @@ export class Element {
       return (...args) => { target.styles[prop] = args; return receiver; };
     } });
   }
-  child(value) { if (value !== null && value !== undefined) this.nodes.push(value); return this; }
+  // Herdr's GPUI rejects anything else (seen natively: "child(value) expects an element, a
+  // string, or an entity from cx.new(Class, props)"), including null from an optional part.
+  child(value) {
+    if (!(value instanceof Element) && typeof value !== "string" && typeof value !== "number") throw new TypeError("child(value) expects an element, a string, or an entity from cx.new(Class, props)");
+    this.nodes.push(value); return this;
+  }
   children(values) { for (const value of values) this.child(value); return this; }
   when(condition, fn) { return condition ? fn(this) : this; }
   on_click(fn) { this.events.click = fn; return this; }

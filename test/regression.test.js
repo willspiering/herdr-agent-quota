@@ -243,3 +243,17 @@ test("H1: the mod reads its runtime from a hidden file that never triggers a rel
   const install = await readFile(new URL("../scripts/install.mjs", import.meta.url), "utf8");
   assert.doesNotMatch(install, /\bcp\(/, "setup must not copy files one by one into the live folder");
 });
+
+// ── Found natively: Herdr's child() rejects null/undefined ──
+
+test("native: every surface renders without passing null to child()", async () => {
+  // Herdr showed "child(value) expects an element…" on the dashboard: a single-page pager was null.
+  const data = parseReport(report([codex, claude]));
+  for (const page of ["overview", "configure"]) {
+    const host = await createHost({ data }); host.view.page = page;
+    assert.doesNotThrow(() => host.tree(), page);
+  }
+  // A pane without a program name or title must not hand label() undefined.
+  const header = await createHost({ mode: "header", data, runtime: { pane: "p" }, paneList: [{ pane: "p", terminal: "t1", program: { key: "codex", agent: true } }] });
+  assert.match(flatten(header.tree()), /Terminal/);
+});

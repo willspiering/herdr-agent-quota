@@ -231,13 +231,14 @@ export default class AgentQuota extends View {
     const page = Math.min(this.pages[id] ?? 0, total - 1);
     return { items: items.slice(page * size, (page + 1) * size), page, total };
   }
+  // An array to pass to .children(): Herdr's .child() rejects null, so one page adds nothing.
   pager(id, { page, total }, t) {
-    if (total <= 1) return null;
+    if (total <= 1) return [];
     const change = delta => (_e, cx) => { this.pages[id] = page + delta; cx.notify(); };
-    return h_flex().gap(8).py(6).items_center()
+    return [h_flex().gap(8).py(6).items_center()
       .when(page > 0, el => el.child(this.button(`${id}-prev`, "← Previous", change(-1), t, { small: true })))
       .child(label(`Page ${page + 1} of ${total}`, 11, t.muted))
-      .when(page + 1 < total, el => el.child(this.button(`${id}-next`, "Next →", change(1), t, { small: true })));
+      .when(page + 1 < total, el => el.child(this.button(`${id}-next`, "Next →", change(1), t, { small: true })))];
   }
 
   // ── controls ─────────────────────────────────────────────
@@ -493,7 +494,7 @@ export default class AgentQuota extends View {
         .when(remote, el => el.child(label(machine ? `on ${machine}` : "remote", 10, t.muted).flex_none()
           .tooltip("Runs on another machine. Its quota is not linked to this computer's sign-ins.")))
         .child(label("go to →", 10, t.muted).flex_none());
-    })).child(this.pager(id, page, t));
+    })).children(this.pager(id, page, t));
   }
 
   provider(p) {
@@ -522,7 +523,7 @@ export default class AgentQuota extends View {
         .child(label(activity[0], 11, activity[1]).flex_none()))
       .when(Boolean(status), el => el.child(label(status, 11, t.warning)))
       .when(Boolean(body), el => el.child(body))
-      .child(this.pager(limitId, limitPage, t))
+      .children(this.pager(limitId, limitPage, t))
       .when(Boolean(empty), el => el.child(h_flex().gap(10).items_center()
         .child(label(`— ${empty[0]}`, 12, t.muted))
         .when(Boolean(empty[1]), el => el.child(this.button(`limits-${p.key}`, empty[1], (_e, cx) => { this.page = "configure"; cx.notify(); }, t, { small: true })))))
@@ -581,9 +582,9 @@ export default class AgentQuota extends View {
             this.chip(`window-${w.key}`, shortLabel(w, p.windows), shows(w, o), () => {
               const current = this.opts();
               set({ windows: { ...current.windows, [w.key]: !shows(w, current) } });
-            }, t)))).child(this.pager(limitId, limits, t)));
+            }, t)))).children(this.pager(limitId, limits, t)));
       }))
-      .child(this.pager("configure-providers", providerPage, t))
+      .children(this.pager("configure-providers", providerPage, t))
       .child(this.section("── about this data", t))
       .child(v_flex().px(10).gap(4)
         .child(label("Reads after an agent finishes a turn (at most once a minute), every 3 minutes while agents work, and every 10 minutes otherwise. Never makes inference requests.", 11, t.muted))
@@ -612,7 +613,7 @@ export default class AgentQuota extends View {
         .child(label("Start an agent in Herdr, or show hidden providers in Settings.", 12, t.muted))
         .child(this.button("empty-settings", "Open settings", toSettings, t))))
       .children(providerPage.items.map(p => this.provider(p)))
-      .child(this.pager("overview-providers", providerPage, t));
+      .children(this.pager("overview-providers", providerPage, t));
     return v_flex().id("agent-quota-dashboard").size_full().bg(t.popover).text_color(t.foreground).font_family(this.f.mono)
       .on_size_change((s, cx) => this.resized(s, cx))
       .track_focus(this.keys).on_key_down(e => { if (e.key === "escape") this.dismiss(); })
@@ -659,6 +660,7 @@ export default class AgentQuota extends View {
     const { o, t } = this.f;
     const p = this.f.pane;
     if (!p) return div();
+    const name = p.program?.name ?? p.title ?? "Terminal";
     const id = providerId(p.program?.key || p.app);
     const lanes = this.f.all.filter(a => a.id === id);
     const single = lanes.length === 1 ? lanes[0] : null;
@@ -668,8 +670,8 @@ export default class AgentQuota extends View {
       : ws.length ? `${ws.map(w => `${shortLabel(w, single.windows)} ${this.value(w, this.state(w, single))}`).join(" · ")}${o.metric === "left" ? " left" : ""}` : "quota —";
     return h_flex().id(`quota-pane-${p.pane}`).size_full().px(10).gap(8).items_center().bg(t.background).border_b(1).border_color(t.border)
       .on_click(() => run("pane.focus", { pane: p.pane }))
-      .child(this.glyph({ id, label: p.program?.name ?? p.title, program: p.program }, 13, t))
-      .child(label(p.program?.name ?? p.title, 12, t.foreground).max_w(150).truncate())
+      .child(this.glyph({ id, label: name, program: p.program }, 13, t))
+      .child(label(name, 12, t.foreground).max_w(150).truncate())
       .child(label(p.cwd ?? "", 11, t.muted).flex_1().min_w(0).truncate())
       .when(Boolean(p.status), el => el.child(label(STATE_LABEL[p.status] ?? p.status, 11, t[p.status] ?? t.muted)))
       .when(p.program?.agent === true, el => el.child(this.button(`quota-for-${p.pane}`, quota, () => this.open(id), t, { small: true, a11y: `Open ${p.program?.name ?? "agent"} quota` }).font_family(this.f.mono)))
