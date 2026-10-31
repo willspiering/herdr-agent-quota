@@ -240,6 +240,6 @@ stale quota.
 
 Seen in screenshots: the column renders beside the terminal pane, framed like it,
 with gauges, sessions and the ✕ button; hiding it gives the terminal its width back.
-Not yet exercised natively: Escape and ✕ in the column (driven only through
-`layout.hide`), `cmd-shift-u` (bound, but not pressed), the column's meter-row
-layout, the light theme and zoom at column width, and resizing the column by drag.
+Checked by hand afterwards and reported working: `cmd-shift-u`, Escape and ✕ in
+the column, resizing it by drag, the meter-row layout, and the light theme and zoom
+at column width.
