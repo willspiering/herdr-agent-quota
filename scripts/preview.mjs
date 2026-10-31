@@ -22,8 +22,8 @@ const light={...dark,foreground:'#20242c',muted:'#505a69',dim:'#596372',border:'
 let scenario='normal',storage={},properties={},currentTheme=dark;
 const shared=k=>storage[k],setShared=(k,v)=>{storage[k]=v;queueMicrotask(render)},props=()=>properties,theme=()=>currentTheme,settings=()=>({dark:scenario!=='light'});
 const appHome=()=>'',exec=async()=>({code:127}),readTextFile=async()=>null,knownAgents=async()=>[],nextCommand=()=>new Promise(()=>{}),closeOverlay=()=>{},openOverlay=()=>{},run=()=>{};
-const activity=[{address:'t1',space:'s1',space_name:'Personal',tab_name:'Build quota',program:{key:'codex'},status:'working',focused:true},{address:'t2',space:'s2',space_name:'dotadda-knowledge',tab_name:'Review',program:{key:'claude'},status:'blocked'},{address:'splinter/t3',space:'s3',space_name:'Practice',tab_name:'Research',program:{key:'grok'},status:'idle'}];
-const agents=()=>scenario==='empty'?[]:activity,spaces=()=>[{id:'s1'},{id:'s2'},{id:'s3',machine:'splinter'}],panes=()=>[];
+const activity=[{address:'t1',space:'s1',space_name:'Personal',tab_name:'Build quota',program:{key:'codex'},status:'working',focused:true},{address:'t2',space:'s2',space_name:'Example project',tab_name:'Review',program:{key:'claude'},status:'blocked'},{address:'remote/t3',space:'s3',space_name:'Practice',tab_name:'Research',program:{key:'grok'},status:'idle'}];
+const agents=()=>scenario==='empty'?[]:activity,spaces=()=>[{id:'s1'},{id:'s2'},{id:'s3',machine:'remote'}],panes=()=>[];
 const cx={focus_handle:()=>({focus(){},is_focused:()=>false}),notify:()=>queueMicrotask(render),stop_propagation(){},spawn(){},timer:{every(){}}};
 ${main}
 const dashboard=new AgentQuota(),strip=new AgentQuota();properties={mode:'dashboard'};dashboard.init(properties,cx);properties={mode:'strip'};strip.init(properties,cx);
