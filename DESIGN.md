@@ -139,7 +139,11 @@ It lists providers with readable limits or running sessions only.
 - **Session row:** whole-row button: status mark, status word, `space / tab`,
   `on <machine>` for remote, `go to →`.
 - **Callouts:** redline (`▲ Over redline · …`, redline border with 10% tint)
-  and collector attention (warning border).
+  and collector attention (warning border). Only providers covered by the failed
+  read turn stale.
+- **Refresh:** `↻ Refresh`; `Refreshing` plus a native `frames` spinner while any
+  copy holds the shared claim; `Queued` (with a tooltip) when pressed inside the
+  10 s cooldown.
 - **Pane header:** glyph, name, folder, status, monospace quota button and
   small Split/Zoom/Close.
 

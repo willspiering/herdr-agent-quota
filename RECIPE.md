@@ -62,12 +62,20 @@ hourly, on Refresh and after a failure. Pane headers only display. Paint meters
 with `window.paint_path`: each run of same-colored cells is one
 `PathBuilder.stroke(h)` line (or `arc_to`) with `dash_array([cell, gap])`. Use native motion (`frames`, `transition`); no animation polling.
 
-Collection always runs through `scripts/collect.mjs`, whose supervisor limits
-the quota subprocess to 30 seconds and 1 MiB stdout and reaps its process group
-on macOS/Linux. Raw audit JSON is reduced outside Herdr. Setup records the
-absolute Node, supervisor and quota-axi paths. A 45-second shared claim prevents
-competing copies/builds from reading concurrently; retired and late results are
-discarded. Discovery runs separately, hourly or on manual refresh (at most once
+Collection always runs through `scripts/collect.mjs`. Herdr's `exec` stops any
+program at 30 s, so the supervisor must always finish first. It gives quota-axi
+at most 24 s from the supervisor's own start (and never past claim + 30 s), caps
+stdout at 1 MiB, and kills the collector's process group when it finishes, times
+out, or receives SIGTERM, SIGHUP or SIGINT. Each group is recorded in
+`.runtime/groups/`, so a group left by an untrappable SIGKILL is reaped by the
+next read. The supervisor returns as soon as quota-axi exits, after a 150 ms
+drain, even if a helper keeps stdout open. Raw audit JSON is reduced outside
+Herdr. Setup records the absolute Node, supervisor and quota-axi paths in the
+hidden `.runtime.json`. A 35-second shared claim prevents competing
+copies/builds from reading concurrently; retired and late results are discarded.
+The dashboard's spinner follows that shared claim. A Refresh inside the 10 s
+cooldown is queued, labelled "Queued" and run when the cooldown ends. A failed
+read marks only the providers it covered as stale. Discovery runs separately, hourly or on manual refresh (at most once
 a minute). Headers cache their provider's lanes until collection revision changes.
 Activity is grouped once per provider using a space map, independent of account count.
 
@@ -79,7 +87,11 @@ keep every item reachable. Keep redline summary text bounded, with an overflow c
 The installer clones through `layout.clone` to retain click state, changes
 only its clone, preserves the existing status mod and refuses unfamiliar
 headers or name collisions. Runtime paths are generated separately, never
-hardcoded to a particular user's home.
+hardcoded to a particular user's home. Saving any file in a mod folder reloads
+every copy, except hidden files, `.d.ts` files, `jsconfig.json` and `node_modules`.
+So setup writes its generated files hidden (`.runtime.json`, `.installation.json`).
+It then stages changed build files beside the mods folder and renames them in
+together, with no await between renames.
 
 ## Watch out
 
@@ -105,6 +117,17 @@ do not infer a terminal's account. Remote activity is unlinked to local quota.
 Unknown percentages stay unknown. A past reset suppresses the old value;
 stale values are historical and never count toward redline alerts. Used-share
 windows are not independent quota pools. Provider durations and limits vary.
+
+Herdr's `exec` is capped at 30 s and 8 MiB. When it hits the cap it stops the
+program it started, not that program's detached children, so every subprocess
+budget must end well before 30 s. Herdr rejects for both a program that can't
+start and a program it stopped, so tell the two apart before showing a message.
+quota-axi's own detached helpers (claude-swap, delegated refresh) only run when
+credential refresh is on; keep `--no-credential-refresh`.
+
+Limit ids are parsed twice: once in the supervisor and again in Herdr. Keep the
+id bound large enough that a fallback id (kind and label) survives the second
+parse whole.
 
 The Dock can have a different PATH. Use the setup-generated absolute paths;
 if unavailable, show setup instructions. Unbounded PATH/login-shell fallbacks

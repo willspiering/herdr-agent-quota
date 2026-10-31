@@ -23,6 +23,11 @@ layout, colors, redline, and which providers and limits show. Changes apply
 immediately with a live preview. Quota availability depends on each provider
 and your sign-in.
 
+Each quota read runs quota-axi under a small Node supervisor. It finishes in
+under 24 s (Herdr stops any program at 30 s) and leaves no process behind.
+quota-axi is passed `--no-credential-refresh` and never makes inference
+requests.
+
 Optional keys in `keys.json`: `"agent-quota.open"`, `"agent-quota.settings"`
 and `"agent-quota.refresh"`.
 
@@ -37,6 +42,7 @@ For Claude on macOS, you may need a one-time Keychain grant:
 ```sh
 npm ci --ignore-scripts
 npm test
+npm run typecheck   # strict, minus implicit-any and null checks, against ~/.config/herdr-app declarations
 npm run check
 npm run benchmark
 ```

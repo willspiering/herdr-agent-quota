@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Fix (F1): Herdr's 30 s `exec` cap stopped the supervisor first and left
+  quota-axi running with no limit. The supervisor now finishes within 24 s of
+  its own start, kills the collector's group on SIGTERM/SIGHUP/SIGINT, and the
+  next read reaps any group left by SIGKILL. The claim is now 35 s. A read
+  Herdr stopped gets its own message instead of "run npm run setup".
+- Fix (F2): a successful read is no longer reported as a timeout when a helper
+  keeps stdout open, and a finished read no longer waits out the 250 ms kill
+  grace.
+- Fix (F3): long unnamed limits no longer fail every read with "duplicate
+  limit identities"; ids keep their `fbb7f2b` form.
+- Fix (F4): the Refresh spinner shows any copy's read; a Refresh during the
+  cooldown is queued and labelled; a failed read marks only the providers it
+  covered as stale.
+- Setup writes `.runtime.json`/`.installation.json` (hidden: no reload) and
+  swaps changed build files in one step. Run setup again after upgrading.
+- `npm run typecheck` checks against the installed Herdr declarations.
+
 - Performance review follow-up: supervise collection with a 30-second deadline,
   1 MiB output cap and macOS/Linux process-group cleanup; coordinate copies via
   a shared claim and discard retired/late results. Run setup again for the new

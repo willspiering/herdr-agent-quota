@@ -4,11 +4,16 @@ Reviewed `5633193`, `f3ce421` and `fbb7f2b` against the installed Herdr
 `AGENTS.md`, `gpui-kit.d.ts` and `herdr.d.ts`. The follow-up changes below
 are a follow-up to those commits. **Native release approval remains pending.**
 
+> **Superseded in part (2026-10-31).** The independent review in
+> `REVIEW-394cad9.md` found that several statements here were wrong. Each is
+> corrected inline below and marked *Correction*. The current behavior and the
+> native measurements are in `VALIDATION.md`.
+
 ## Findings and changes
 
 | Priority | Finding in the committed version | Follow-up |
 | --- | --- | --- |
-| P1 | The 45-second module-local guard could expire while `exec` still ran. Herdr exposes no subprocess timeout, and module sharing between copies was assumed rather than tested. Login-shell fallback also ran arbitrary startup profiles. | Every quota read now uses a Node supervisor with a 30-second subprocess deadline, 250 ms termination grace, 1 MiB stdout cap and discarded stderr. On macOS/Linux it terminates the process group, including inherited helpers. A synchronous shared claim coordinates independent copies/builds; late or retired tasks cannot overwrite newer data. Unsupervised fallbacks were removed. |
+| P1 | The 45-second module-local guard could expire while `exec` still ran. Module sharing between copies was assumed rather than tested. Login-shell fallback also ran arbitrary startup profiles. *Correction:* this row originally said "Herdr exposes no subprocess timeout". That is false: `herdr.d.ts` gives `exec` a 30 s limit and an 8 MiB output limit. | Every quota read uses a Node supervisor with a 1 MiB stdout cap and discarded stderr, and a synchronous shared claim. *Correction:* the original 30-second deadline was armed after Node startup, plus a 250 ms grace, so Herdr's 30 s cap always stopped the supervisor first and left the detached quota-axi group running. Since `f10ecd6` the supervisor budgets 24 s from its own start (bounded also by the claim deadline, claim + 30 s), kills the group on SIGTERM/SIGHUP/SIGINT, and records each group so that one orphaned by an untrappable SIGKILL is reaped by the next read. The claim is 35 s. "Including inherited helpers" covered same-group helpers only. quota-axi's detached helpers (claude-swap, delegated refresh) leave the group, but neither runs under `--no-credential-refresh`, which the mod always passes. |
 | P1 | Dashed strokes bounded each instrument's path commands, but every offscreen provider, limit and session was still built eagerly. A valid large report generated thousands of native descriptions. | Page at four account/provider sections, eight limits per account and eight sessions per account. Settings limit chips are paged too. Every item remains reachable. Redline text previews three entries and counts the rest. |
 | P1 | `catalog()` classified sessions separately for each account, using a linear space search twice per session, and repeated urgency scans during sorting. Cost grew with accounts × agents × spaces. | Classify sessions once using a space map, share provider activity arrays across account lanes, and precompute urgency/favorite ranks. |
 | P2 | Headers claimed to read only their provider, but constructed and sorted the complete catalog on every render. They also called `props()` from inside a pane search. | Headers filter their own provider without catalog construction, cache those lanes until the collection revision/program changes, and read props once before the search. No live agent/space reads, timers, discovery or collection in headers. |
@@ -23,9 +28,10 @@ and limit identities. No credential refresh, inference request, terminal scrapin
 or new runtime dependency was added. The supervisor is loaded from the project
 path recorded by setup; moving the project requires setup again.
 
-The shared claim also supplies an absolute deadline to the supervisor. Work
-delayed in Herdr/core's launch queue cannot restart a fresh thirty-second budget
-after its claim expires; expired launches exit before starting quota-axi.
+The shared claim also supplies an absolute deadline to the supervisor (claim +
+30 s since `f10ecd6`). A launch delayed in Herdr's queue cannot start a fresh
+budget after its claim expires: an expired launch exits before starting
+quota-axi. The supervisor's own 24 s budget is measured from its own start.
 
 ## Existing fixes that are sound
 
@@ -48,12 +54,25 @@ after its claim expires; expired launches exit before starting quota-axi.
 
 `npm test`: **78 passing**, including real child-process tests for hangs,
 stdout overflow, ignored SIGTERM and inherited-pipe descendants. The descendant
-test checks that the recorded child PID actually exits. Lifecycle tests use
+test checks that the recorded child PID actually exits. *Correction:* that test
+expected exit code 124 for a collector that had finished successfully while a
+helper held stdout open. That encoded bug F2 as the intended behavior. It now
+expects the data, and the helper is still reaped. Lifecycle tests use
 independent module evaluations with common shared state, simulated cancellation
 and a controllable clock. Tests also cover page navigation, short turns and
 linear activity classification.
 
-Type checking passes against the installed Herdr declarations. Tests were run
+*Correction:* this originally said "Type checking passes against the installed
+Herdr declarations". It passed only with implicit-`any` checks off. Under the
+shipped `jsconfig.json` (`strict`, `strictNullChecks: false`) TypeScript 5.6.3
+reported 270 errors against the repository's stale `gpui-kit.d.ts` copy (the
+brief counted 274). Against the installed declarations it reports 280, and 359
+with full `--strict`. All of them are implicit-`any` or default-parameter
+inference; none is a misuse of a Herdr or gpui-kit API. The supported command is
+`npm run typecheck`: `tsc` with `--strict --noImplicitAny false
+--strictNullChecks false --skipLibCheck` against
+`~/.config/herdr-app/gpui-kit.d.ts`, with `herdr` mapped to the installed
+`herdr.d.ts`. It reports 0 errors. Tests were run
 with Node **24.11.1**, the Node executable recorded in the installed runtime.
 The shell defaults to Node 21.3.0, below the project's required 22.19; do not
 use that shell default as evidence of supported-runtime compatibility.
@@ -72,6 +91,8 @@ Synthetic before/after results, Node 24.11.1, baseline `fbb7f2b`:
 | Same activity classification, one sample | 1,264.031 ms | 1.026 ms |
 
 The ordinary three-account/two-limit case keeps the same number of UI nodes.
+*Correction:* the large-scenario gains come from drawing 32 of 800 limits
+(pagination). The cost per visible item did not change.
 Reproduce with `npm run benchmark -- fbb7f2b` on supported Node. Local raw
 results are in ignored `artifacts/performance-review-node24.json`.
 
@@ -94,8 +115,9 @@ From a regular terminal on supported Node, install once:
 node ~/DEV/Personal/herdr-agent-quota/scripts/install.mjs --headers --no-deps
 ```
 
-This updates `runtime.json` with the supervisor path. Copying just `main.js` is
-insufficient. Avoid iterative live copying while diagnosing this incident.
+This writes `.runtime.json` (hidden, so writing it doesn't reload the mod) with the
+supervisor path, then swaps the changed build files in one step (`scripts/swap.mjs`).
+Copying just `main.js` is insufficient. Avoid iterative live copying.
 
 Before calling this release-ready:
 
