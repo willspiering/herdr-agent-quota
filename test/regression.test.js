@@ -216,3 +216,30 @@ test("F4: the dashboard and strip mark only failed providers stale", async () =>
     assert.doesNotMatch(out, /~20%/, mode);
   }
 });
+
+// ── H1: setup swaps a build in one step and writes generated files hidden ──
+
+test("H1: setup stages the build and swaps only changed files in one step", async () => {
+  const { swapBuild } = await import("../scripts/swap.mjs");
+  const dir = await mkdtemp(join(tmpdir(), "quota-swap-"));
+  try {
+    const source = join(dir, "src"), target = join(dir, "mod"), staging = join(dir, ".staging");
+    const { mkdir: md, writeFile: wf, readFile: rf, readdir: rd } = await import("node:fs/promises");
+    await md(source); await md(target);
+    for (const [name, text] of [["main.js", "new"], ["core.js", "same"], ["mod.json", "{}"], ["gpui-kit.d.ts", "x"], ["jsconfig.json", "x"]]) await wf(join(source, name), text);
+    for (const [name, text] of [["main.js", "old"], ["core.js", "same"], ["runtime.json", "{}"], [".runtime.json", "{}"]]) await wf(join(target, name), text);
+    const changed = await swapBuild(source, target, staging, ["runtime.json", "installation.json"]);
+    assert.equal(changed, 3); // main.js and mod.json moved in, legacy runtime.json removed
+    assert.equal(await rf(join(target, "main.js"), "utf8"), "new");
+    assert.deepEqual((await rd(target)).sort(), [".runtime.json", "core.js", "main.js", "mod.json"]);
+    assert.deepEqual((await rd(dir)).sort(), ["mod", "src"]); // staging cleaned up
+    assert.equal(await swapBuild(source, target, staging, ["runtime.json"]), 0); // idempotent: no writes
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("H1: the mod reads its runtime from a hidden file that never triggers a reload", async () => {
+  const source = await readFile(new URL("../mods/agent-quota/main.js", import.meta.url), "utf8");
+  assert.match(source, /mods\/agent-quota\/\.runtime\.json/);
+  const install = await readFile(new URL("../scripts/install.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(install, /\bcp\(/, "setup must not copy files one by one into the live folder");
+});

@@ -208,6 +208,7 @@ export function catalog(report, discovered, live, spaces, o) {
     .sort((a, b) => (o.activeFirst ? urgency(b) - urgency(a) : 0) || fav(a.id) - fav(b.id) || a.label.localeCompare(b.label) || a.account.localeCompare(b.account));
 }
 
+/** @param {boolean | ((p: any) => boolean)} [failed] Whether a provider's last read failed. */
 export function redlines(list, o, now, failed = false) {
   const stale = typeof failed === "function" ? failed : () => failed;
   return list.flatMap(p => visibleWindows(p, o).filter(w => windowState(w, p, now, stale(p)) === "fresh" && w.percentUsed >= o.redline).map(w => ({ p, w })));

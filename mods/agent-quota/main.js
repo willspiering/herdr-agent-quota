@@ -78,7 +78,7 @@ export default class AgentQuota extends View {
     // Pane headers, one per pane, only display. The strip schedules reads; the dashboard reads
     // when opened. The 10 s check is in-memory: it runs a read only when one is due.
     if (this.mode !== "header") cx.spawn(async cx => {
-      try { this.runtime = JSON.parse(await readTextFile(`${appHome()}/mods/agent-quota/runtime.json`) || "{}"); } catch { /* collection reports setup instructions */ }
+      try { this.runtime = JSON.parse(await readTextFile(`${appHome()}/mods/agent-quota/.runtime.json`) || "{}"); } catch { /* collection reports setup instructions */ }
       cx.phase(); // End retired tasks before they start a subprocess or publish state.
       this.tick(cx, { looking: this.mode === "dashboard" });
     });

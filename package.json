@@ -4,14 +4,22 @@
   "private": true,
   "type": "module",
   "description": "Account quota gauges and agent activity across Herdr spaces",
-  "engines": { "node": ">=22.19" },
+  "engines": {
+    "node": ">=22.19"
+  },
   "scripts": {
     "test": "node --test test/*.test.js",
     "check": "node scripts/check.mjs",
     "benchmark": "node scripts/benchmark.mjs",
     "setup": "node scripts/install.mjs",
     "setup:headers": "node scripts/install.mjs --headers",
-    "preview": "node scripts/preview.mjs"
+    "preview": "node scripts/preview.mjs",
+    "typecheck": "node scripts/typecheck.mjs"
   },
-  "dependencies": { "quota-axi": "0.1.69" }
+  "dependencies": {
+    "quota-axi": "0.1.69"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
 }

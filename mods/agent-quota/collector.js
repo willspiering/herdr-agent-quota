@@ -20,7 +20,7 @@ export async function collect(exec, runtime = {}, now = Date.now(), providers = 
   catch (error) {
     // Herdr rejects both when a program can't start and when it hits the 30 s cap. Only the
     // wording is inspected; it is never stored.
-    if (/longer than|was stopped/i.test(String(error?.message ?? error))) throw new QuotaError(STOPPED);
+    if (/longer than|was stopped/i.test(error instanceof Error ? error.message : String(error))) throw new QuotaError(STOPPED);
     throw new QuotaError("Quota collector could not start. Run npm run setup in the Herdr Agent Quota project.");
   }
   const code = result?.code;
