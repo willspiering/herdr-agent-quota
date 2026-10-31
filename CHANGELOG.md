@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Fix: opening the dashboard could show "could not be re-rendered ·
+  interrupted". Each painted cell was its own polygon (about five host calls),
+  so a full dashboard made thousands of calls in one render. A run of
+  same-colored cells is now one dashed stroke (three calls), and the cost no
+  longer grows with meter width. A test caps the calls for an 18-limit dashboard.
+- The time tick is explained. The dashboard header has a legend (`■ used`,
+  `■ redline 70%+`, `│ time elapsed`), and each meter, gauge and strip limit has
+  a tooltip with used/left, how much of the window has passed, the pace in
+  words and the reset time.
+- The redline zone is easier to see: unlit cells there are 35% red instead of 20%.
+
 - Event-driven collection: read after an agent finishes a turn (at most once a
   minute), on a limit reset, on opening a stale dashboard and on Refresh, with
   3-minute (working) and 10-minute (idle) backstops. An idle day falls from 720

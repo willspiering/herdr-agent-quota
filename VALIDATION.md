@@ -80,6 +80,19 @@ running. Terminals in herdr-core stayed live throughout.
 
 - Remote account quota and absolute token-count telemetry are not implemented.
 
+## Render budget and time legend, 2026-10-30
+
+- The user saw `interrupted` on opening the dashboard. The trace ended in
+  Herdr's `add_polygon` shim, which issues one host call per point. Meters
+  now use one dashed stroke per run of cells.
+- Native `herdr-app shot`: the dashed meters, the 35% redline zone, the white
+  tick and the header legend render correctly in the strip and the meter-row
+  dashboard (dark theme). Five dashboard opens, four with a forced refresh,
+  showed no banner and `herdr-app status` reported no errors. CPU spiked once
+  during the forced refreshes and settled at 5–14% within seconds.
+- Not inspected natively: the gauge layout's dashed arcs and tooltip hover
+  (no pointer automation). `npm test`: 64 passing.
+
 ## Remaining native checks
 
 - Compare measurements directly against provider data and test authentication

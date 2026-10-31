@@ -2,7 +2,8 @@
 
 A quiet, terminal-styled quota readout at the right end of Herdr's status bar
 opens a view of account limits and agent activity. Each limit is a segmented
-meter (or optional 240° gauge) with a dim red zone from 70% used. Codex, Claude and Grok lead when
+meter (or optional 240° gauge) with a dim red zone from 70% used and a white
+tick for how much of its window has passed, named by a legend in the header. Codex, Claude and Grok lead when
 no active agent takes priority. A publication screenshot is pending broader
 native validation; no synthetic image is represented as a live capture.
 
@@ -58,8 +59,8 @@ data over 60 s old, Refresh, a 3-minute backstop while any agent works and a
 60 s to 10 minutes. Routine reads pass `--provider` for providers with limits
 or local agents (0.07 s versus 0.6 s for all 19); every provider is swept
 hourly, on Refresh and after a failure. Pane headers only display. Paint meters
-with `window.paint_path` and `PathBuilder.fill().add_polygon`, one path per
-color. Use native motion (`frames`, `transition`); no animation polling.
+with `window.paint_path`: each run of same-colored cells is one
+`PathBuilder.stroke(h)` line (or `arc_to`) with `dash_array([cell, gap])`. Use native motion (`frames`, `transition`); no animation polling.
 
 The installer clones through `layout.clone` to retain click state, changes
 only its clone, preserves the existing status mod and refuses unfamiliar
@@ -67,6 +68,10 @@ headers or name collisions. Runtime paths are generated separately, never
 hardcoded to a particular user's home.
 
 ## Watch out
+
+Every path command is a separate call into the host. A polygon per cell (five
+calls) over a full dashboard ran past Herdr's render budget and showed
+`could not be re-rendered · interrupted`; keep calls independent of cell count.
 
 Test with as few hot reloads as possible. On Herdr 0.1.10 each reload leaves
 QuickJS JIT feedback behind; after ~20 reloads its maintenance pass dominated

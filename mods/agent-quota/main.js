@@ -20,6 +20,11 @@ const put = (suffix, value) => {
 };
 const GENERIC_ERROR = "Quota collection failed. Run quota-axi in a terminal to check it.";
 const STATE_LABEL = { working: "Working", blocked: "Needs you", done: "Finished", idle: "Idle" };
+const PACE_NOTE = {
+  "Ahead of pace": "Using faster than time is passing; at this rate it runs out before the reset",
+  "Under pace": "Using slower than time is passing; it should last until the reset",
+  "On pace": "Using about as fast as time is passing",
+};
 const STATE_MARK = { working: "●", blocked: "▲", done: "✓", idle: "○" };
 const ICONS = { claude: "claude", codex: "codex", grok: "grok", cursor: "cursor", copilot: "copilot", kimi: "kimi" };
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -39,19 +44,18 @@ const tint = (color, alpha) => /^#[0-9a-f]{6}$/i.test(color ?? "") ? `${color}${
 const label = (s, size, color) => div().text_size(size).text_color(color).child(s);
 const rule = t => div().h(1).w_full().flex_none().bg(t.border);
 
-// One native path per color: a meter costs three draws, not one element per cell.
-const quad = (x, y, w, h) => [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
-function painted(width, height, groups) {
-  const el = div().relative().w(width).h(height).flex_none();
-  for (const [fill, polygons, alpha] of groups) {
-    if (!polygons.length) continue;
-    let path = PathBuilder.fill();
-    for (const points of polygons) path = path.add_polygon(points, true);
-    el.child(window.paint_path(path.build(), alpha === undefined ? fill : Background.solid(fill).opacity(alpha))
-      .absolute().top(0).left(0).size_full());
-  }
-  return el;
+// Each run of same-colored cells is one dashed stroke: three host calls however many cells
+// it holds. A polygon per cell cost five calls each, and a dashboard full of them ran past
+// Herdr's render budget ("could not be re-rendered · interrupted").
+const ZONE = .35;
+function runs(kinds) {
+  const out = [];
+  kinds.forEach((kind, i) => { const last = out[out.length - 1]; if (last?.kind === kind) last.end = i + 1; else out.push({ kind, start: i, end: i + 1 }); });
+  return out;
 }
+const layer = (path, [fill, alpha]) => window.paint_path(path, alpha === undefined ? fill : Background.solid(fill).opacity(alpha))
+  .absolute().top(0).left(0).size_full();
+const painted = (width, height, layers) => div().relative().w(width).h(height).flex_none().children(layers);
 
 export default class AgentQuota extends View {
   init(_props, cx) {
@@ -263,30 +267,52 @@ export default class AgentQuota extends View {
 
   // A segmented bar; the foreground tick marks how much of the window has elapsed.
   meter(w, p, width, height, cell = 5, gap = 2) {
-    const t = this.f.t, state = this.state(w, p);
+    const t = this.f.t, state = this.state(w, p), paint = this.paints(w, state), y = height / 2;
     const n = Math.max(4, Math.floor((width + gap) / (cell + gap)));
-    const size = (width - gap * (n - 1)) / n;
-    const groups = { lit: [], danger: [], off: [] };
-    this.cells(n, w, state).forEach((kind, i) => groups[kind].push(quad(i * (size + gap), 0, size, height)));
+    const size = (width - gap * (n - 1)) / n, step = size + gap;
+    const layers = runs(this.cells(n, w, state)).map(r => layer(PathBuilder.stroke(height)
+      .move_to(r.start * step, y).line_to(r.end * step - gap, y).dash_array([size, gap]).build(), paint[r.kind]));
     const m = this.marker(w, state);
-    return painted(width, height, [[t.border, groups.off], [t.redline, groups.danger, .2], [this.fill(w, state), groups.lit],
-      [t.foreground, m === null ? [] : [quad(Math.min(width - 2, Math.max(0, m * width - 1)), 0, 2, height)], .85]]);
+    if (m !== null) {
+      const x = Math.min(width - 1, Math.max(1, m * width));
+      layers.push(layer(PathBuilder.stroke(2).move_to(x, 0).line_to(x, height).build(), [t.foreground, .85]));
+    }
+    return painted(width, height, layers);
   }
+  // What the meter and its time tick mean for this limit, in words.
+  timeNote(w, state) {
+    const now = this.f.now, lines = [];
+    if (state !== "fresh") lines.push(({ stale: "Last reading; may be out of date", reset: "Reset passed; awaiting a new reading", unknown: "Usage not reported", untrusted: "Unverified reading", share: `Share of ${w.shareOf}` })[state] ?? state);
+    else {
+      lines.push(`${Math.round(w.percentUsed)}% used · ${Math.round(100 - w.percentUsed)}% left`);
+      const e = elapsed(w, now);
+      if (e !== null) lines.push(`│ ${Math.round(e * 100)}% of this window has passed`);
+      const verdict = PACE_NOTE[pace(w, now)];
+      if (verdict) lines.push(verdict);
+    }
+    lines.push(resetLabel(w, now));
+    return lines.join("\n");
+  }
+  paints(w, state) { const t = this.f.t; return { off: [t.border], danger: [t.redline, ZONE], lit: [this.fill(w, state)] }; }
 
   // A solid 240° speedometer in 30 segments, clockwise from lower left.
   arc(w, p, size) {
-    const t = this.f.t, state = this.state(w, p), n = 30;
-    const c = size / 2, outer = size / 2 - 5, inner = outer - 11, height = Math.round(c + outer * .5 + 6);
+    const t = this.f.t, state = this.state(w, p), paint = this.paints(w, state), n = 30, span = 240 / n, gap = 2.8;
+    const c = size / 2, outer = size / 2 - 5, inner = outer - 11, mid = outer - 5.5, height = Math.round(c + outer * .5 + 6);
     const at = (deg, r) => [c + r * Math.cos(deg * Math.PI / 180), c + r * Math.sin(deg * Math.PI / 180)];
-    const groups = { lit: [], danger: [], off: [] };
-    this.cells(n, w, state).forEach((kind, i) => {
-      const a = 150 + 240 * i / n + 1.4, b = 150 + 240 * (i + 1) / n - 1.4;
-      groups[kind].push([at(a, outer), at(b, outer), at(b, inner), at(a, inner)]);
+    const arcLength = deg => mid * deg * Math.PI / 180;
+    const layers = runs(this.cells(n, w, state)).map(r => {
+      const a = 150 + span * r.start + gap / 2, b = 150 + span * r.end - gap / 2, [x0, y0] = at(a, mid), [x1, y1] = at(b, mid);
+      return layer(PathBuilder.stroke(11).move_to(x0, y0).arc_to(mid, mid, 0, b - a > 180, true, x1, y1)
+        .dash_array([arcLength(span - gap), arcLength(gap)]).build(), paint[r.kind]);
     });
-    const m = this.marker(w, state), mark = [];
-    if (m !== null) { const d = 150 + 240 * m; mark.push([at(d - .9, outer + 4), at(d + .9, outer + 4), at(d + .9, inner - 3), at(d - .9, inner - 3)]); }
+    const m = this.marker(w, state);
+    if (m !== null) {
+      const d = 150 + 240 * m, [x0, y0] = at(d, outer + 4), [x1, y1] = at(d, inner - 3);
+      layers.push(layer(PathBuilder.stroke(2).move_to(x0, y0).line_to(x1, y1).build(), [t.foreground, .85]));
+    }
     const sub = ({ fresh: this.f.o.metric, stale: "last reading", reset: "awaiting reset", unknown: "not reported", untrusted: "unverified", share: "share of parent" })[state];
-    return painted(size, height, [[t.border, groups.off], [t.redline, groups.danger, .2], [this.fill(w, state), groups.lit], [t.foreground, mark, .85]])
+    return painted(size, height, layers).tooltip(this.timeNote(w, state))
       .child(div().absolute().left(0).top(c - 20).w(size).text_center().text_size(24).font_semibold().text_color(this.fill(w, state)).child(this.value(w, state)))
       .child(div().absolute().left(0).top(c + 10).w(size).text_center().text_size(10).text_color(t.muted).child(sub));
   }
@@ -297,7 +323,7 @@ export default class AgentQuota extends View {
     const { o, t } = this.f, state = this.state(w, p);
     const value = label(this.value(w, state), 11, state === "fresh" ? this.fill(w, state) : t.muted);
     const row = h_flex().gap(5).items_center().flex_none()
-      .tooltip(`${p.label} · ${w.label}\n${state === "fresh" ? `${Math.round(w.percentUsed)}% used · ${Math.round(100 - w.percentUsed)}% left` : state}\n${resetLabel(w, this.f.now)}`)
+      .tooltip(`${p.label} · ${w.label}\n${this.timeNote(w, state)}`)
       .child(label(shortLabel(w, p.windows), 10, t.muted).max_w(64).truncate());
     if (o.strip === "meter") return row.child(this.meter(w, p, 34, 8, 3, 1)).child(value);
     if (o.strip === "blocks") {
@@ -365,7 +391,7 @@ export default class AgentQuota extends View {
     const note = state === "fresh" ? pace(w, this.f.now) : state === "stale" ? "Stale · refresh" : state === "share" ? `Share of ${w.shareOf}` : "";
     return h_flex().gap(12).h(24).items_center()
       .child(label(shortLabel(w, p.windows), 12, t.foreground).w(72).flex_none().truncate().tooltip(w.label))
-      .child(this.meter(w, p, meterWidth, 10))
+      .child(this.meter(w, p, meterWidth, 10).tooltip(this.timeNote(w, state)))
       .child(h_flex().w(76).flex_none().gap(4).items_baseline()
         .child(label(this.value(w, state), 13, this.fill(w, state)).font_semibold())
         .when(state === "fresh" || state === "stale", el => el.child(label(this.f.o.metric, 10, t.muted))))
@@ -527,7 +553,7 @@ export default class AgentQuota extends View {
       .child(h_flex().px(24).pb(12).gap(8).items_center().flex_none()
         .child(this.segmented("page", [["overview", "Overview"], ["configure", "Settings"]], this.page, (v, cx) => { this.page = v; cx.notify(); }, t))
         .child(div().flex_1())
-        .child(label(`redline ${o.redline}%`, 11, t.redline)))
+        .child(this.legend()))
       .child(rule(t))
       .child(v_flex().id(`quota-scroll-${this.page}`).flex_1().min_h(0).px(24).overflow_y_scrollbar()
         .when(failed, el => el.child(v_flex().mt(14).px(12).py(10).gap(4).rounded(4).border(1).border_color(t.warning)
@@ -538,6 +564,18 @@ export default class AgentQuota extends View {
       .child(rule(t))
       .child(h_flex().px(24).py(10).flex_none()
         .child(label("Quota is per account and shared across spaces · remote sessions show activity only", 10, t.muted).truncate()));
+  }
+
+  // Teaches the meter once: what fills, where redline starts, and what the white tick is.
+  legend() {
+    const { o, t } = this.f;
+    const swatch = (color, alpha) => div().w(8).h(8).flex_none().bg(alpha ? tint(color, alpha) ?? color : color);
+    const item = (mark, text, color = t.muted) => h_flex().gap(5).items_center().flex_none().child(mark).child(label(text, 10, color));
+    return h_flex().id("quota-legend").gap(12).items_center().min_w(0).overflow_hidden()
+      .child(item(swatch(t.healthy), o.metric))
+      .child(item(swatch(t.redline, "59"), o.metric === "left" ? `redline ≤${100 - o.redline}% left` : `redline ${o.redline}%+`, t.redline))
+      .child(item(div().w(2).h(10).flex_none().bg(t.foreground), "time elapsed"))
+      .tooltip("Cells fill with usage. The dim red cells are the redline zone; reaching them turns the meter red.\nThe white tick shows how much of the limit's window has passed: fill past the tick means you are using quota faster than time.");
   }
 
   // ── pane header ──────────────────────────────────────────

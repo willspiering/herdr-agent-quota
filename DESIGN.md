@@ -79,7 +79,9 @@ the authority for surfaces and text. This record is derived from
   back to them when a theme lacks ANSI colors.
 - **Thresholds:** warning from 15 points below the redline; redline at or above it.
 - **Zone and marks:** unlit cells use `border`; unlit cells inside the redline
-  zone use `redline` at 20% opacity; the elapsed-time tick is `foreground` at 85%.
+  zone use `redline` at 35% opacity; the elapsed-time tick is `foreground` at 85%.
+  A legend beside the page control names all three; each instrument's tooltip
+  gives the elapsed share and the pace in words.
 - **Inherited:** `chrome` (strip, segmented track, preview), `popover`
   (dashboard), `selected`/`input` (chosen controls), `hover`, `accent`
   (focus borders, switch on), `muted`/`dim` (metadata), and `working`,
@@ -115,8 +117,8 @@ It lists providers with readable limits or running sessions only.
 - **Meter:** `n = floor((width + gap) / (cell + gap))` cells; lit cells =
   `ceil(value / 100 × n)`. With Left, lit cells are remaining headroom and the
   red zone sits at the empty end.
-- **Gauge:** 30 quads on a 240° clockwise arc from 150°, outer radius
-  `size/2 − 5`, 11 thick, 1.4° gaps; centered value with `used`/`left` or state word.
+- **Gauge:** 30 segments on a 240° clockwise arc from 150°, outer radius
+  `size/2 − 5`, 11 thick, 2.8° gaps, each run one dashed `arc_to` stroke; centered value with `used`/`left` or state word.
 - **Blocks:** 8 characters, `▕` + `█` lit + `░` unlit + `▏`.
 
 ## Components
@@ -139,7 +141,8 @@ It lists providers with readable limits or running sessions only.
 ## Do's and Don'ts
 
 - **Do** inherit theme, font and ANSI colors at render time.
-- **Do** paint instruments with native paths, never one element per cell.
+- **Do** paint instruments with native paths, never one element per cell. Draw
+  each run of same-colored cells as one dashed stroke; host calls must not grow with cells.
 - **Do** keep every choice visible (segmented, switches, chips) with a live preview.
 - **Don't** invent percentages, reset times or token counts, or sum quota across spaces.
 - **Don't** call `cx.notify()` from `on_size_change`; repaint from a task.

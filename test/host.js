@@ -25,12 +25,16 @@ export const constructors = {
   Button: { new: id => new Element("button").id(id) },
   PathBuilder: { fill: () => path(), stroke: () => path() },
   Background: { solid: color => ({ color, opacity: () => ({ color }) }) },
-  // Painted paths become elements that record their polygon count and fill.
-  window: { paint_path: (built, fill) => new Element("path", { polygons: built.polygons, fill: fill?.color ?? fill }) },
+  // Painted paths become elements that record their host commands and fill, like Herdr's shim:
+  // each move_to, line_to, arc_to, close and dash_array is one call into the host.
+  window: { paint_path: (built, fill) => new Element("path", { commands: built.commands, fill: fill?.color ?? fill }) },
 };
 function path() {
-  const polygons = [];
-  const builder = { add_polygon(points) { polygons.push(points); return builder; }, build: () => ({ polygons }) };
+  const commands = [];
+  const builder = {};
+  for (const name of ["move_to", "line_to", "arc_to", "curve_to", "close", "dash_array"]) builder[name] = (...args) => { commands.push([name, ...args]); return builder; };
+  builder.add_polygon = points => { points.forEach((pt, i) => commands.push([i ? "line_to" : "move_to", ...pt])); commands.push(["close"]); return builder; };
+  builder.build = () => ({ commands });
   return builder;
 }
 export const palette = {

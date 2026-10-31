@@ -20,19 +20,48 @@ test("dashboard renders measured meters and the redline callout", async () => {
   assert.match(text, /78%/); assert.match(text, /Over redline · Codex 5h 78%|Over redline · Codex Session 78%/);
   assert.match(text, /per account and shared across spaces/);
 });
-test("meters are painted as one path per color, not an element per cell", async () => {
+const calls = drawn => drawn.reduce((n, p) => n + p.commands.length, 0);
+test("meters are painted as one dashed stroke per run of cells, not a shape per cell", async () => {
   const host = await createHost({ data });
   const drawn = paths(host.tree());
-  assert.ok(drawn.length >= 2 && drawn.length <= 4, `${drawn.length} paths`);
-  assert.ok(drawn.reduce((n, p) => n + p.polygons.length, 0) > 20);
-  // 78% used with a 70% redline: the lit cells carry the terminal's red.
-  assert.ok(drawn.some(p => p.fill === "#e06c75" && p.polygons.length > 0));
+  // 78% used with a 70% redline: one lit run in the terminal's red, then the rest of the red zone.
+  assert.equal(drawn.length, 2);
+  assert.ok(drawn.every(p => p.fill === "#e06c75"));
+  assert.ok(drawn.every(p => p.commands.map(c => c[0]).join() === "move_to,line_to,dash_array"));
 });
 test("gauge layout draws a segmented arc", async () => {
   const host = await createHost({ data });
   host.state[`${PREFIX}.options`] = { dash: "gauges" };
   const drawn = paths(host.tree());
-  assert.equal(drawn.reduce((n, p) => n + p.polygons.length, 0), 30); // no elapsed time reported, so no pace tick
+  assert.equal(drawn.length, 2); // no elapsed time reported, so no pace tick
+  assert.ok(drawn.every(p => p.commands.map(c => c[0]).join() === "move_to,arc_to,dash_array"));
+});
+// The regression behind "could not be re-rendered · interrupted": host calls must not grow with cells.
+test("a full dashboard stays within a small, cell-independent host-call budget", async () => {
+  const providers = ["codex", "claude", "gemini", "copilot", "cursor", "grok"].map((provider, k) => ({ provider, state: { status: "fresh" },
+    windows: ["session", "weekly", "monthly"].map((kind, i) => ({ id: kind, label: kind, kind, percentRemaining: 95 - k * 12 - i * 9,
+      windowSeconds: 604800, resetsAt: new Date(now + 3600000 * (i + 1)).toISOString() })) }));
+  const big = parseReport(JSON.stringify({ schemaVersion: 5, generatedAt: new Date(now).toISOString(), providers }));
+  for (const dash of ["bars", "gauges"]) {
+    const host = await createHost({ data: big });
+    host.state[`${PREFIX}.options`] = { dash, windows: {} };
+    const drawn = paths(host.tree());
+    // 18 limits, each at most three runs (3 calls) plus the time tick (2 calls).
+    assert.ok(drawn.length > 0, dash);
+    assert.ok(calls(drawn) <= 18 * 11, `${dash}: ${calls(drawn)} host calls`);
+  }
+});
+test("the time tick is explained by a legend and by each meter's tooltip", async () => {
+  const timed = parseReport(JSON.stringify({ schemaVersion: 5, generatedAt: new Date(now).toISOString(), providers: [
+    { provider: "codex", state: { status: "fresh" }, windows: [{ id: "weekly", label: "Weekly", kind: "weekly", percentRemaining: 40, windowSeconds: 604800, resetsAt: new Date(now + 302400000).toISOString() }] },
+  ] }));
+  const host = await createHost({ data: timed });
+  assert.match(flatten(find(host.tree(), "quota-legend")), /used.*redline 70%\+.*time elapsed/);
+  let tip;
+  walk(host.tree(), n => { if (n.type === "div" && n.nodes.some(c => c.type === "path")) tip = n.styles.tooltip?.[0]; });
+  assert.match(tip, /60% used · 40% left/);
+  assert.match(tip, /50% of this window has passed/);
+  assert.match(tip, /faster than time/);
 });
 test("settings controls persist and immediately affect the strip", async () => {
   const host = await createHost({ data });
