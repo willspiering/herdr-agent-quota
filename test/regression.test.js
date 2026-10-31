@@ -257,3 +257,22 @@ test("native: every surface renders without passing null to child()", async () =
   const header = await createHost({ mode: "header", data, runtime: { pane: "p" }, paneList: [{ pane: "p", terminal: "t1", program: { key: "codex", agent: true } }] });
   assert.match(flatten(header.tree()), /Terminal/);
 });
+
+test("native: an orphaned claim (copy stopped mid-read) is cleared once it expires", async () => {
+  // Seen natively: a copy reloaded by setup claimed a read, then the app quit; the next window
+  // inherited the claim and showed "Refreshing" past its expiry.
+  const clock = { now: Date.now() };
+  const strip = await createHost({ mode: "strip", clock, data: parseReport(report([codex])) });
+  strip.state[`${PREFIX}.control`] = { attempt: clock.now - 10000, busyUntil: clock.now + 25000, token: "gone-copy" };
+  strip.timers[0].fn(strip.cx);
+  assert.equal(strip.state[`${PREFIX}.control`].token, "gone-copy", "a live claim is left alone");
+  clock.now += 26000;
+  const writes = strip.writes.length;
+  strip.timers[0].fn(strip.cx);
+  const control = strip.state[`${PREFIX}.control`];
+  assert.ok(!control.busyUntil && !control.token, "expired claim not cleared");
+  assert.equal(control.attempt, clock.now - 36000, "the attempt time still paces the next read");
+  assert.equal(strip.writes.length, writes + 1);
+  strip.timers[0].fn(strip.cx);
+  assert.equal(strip.writes.length, writes + 1, "cleared once, not rewritten every check");
+});

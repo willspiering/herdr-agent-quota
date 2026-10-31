@@ -169,7 +169,14 @@ export default class AgentQuota extends View {
   }
 
   tick(cx, { force = false, looking = false } = {}) {
-    const now = Date.now(), control = get("control") ?? null, data = get("data") ?? null;
+    const now = Date.now(), data = get("data") ?? null;
+    let control = get("control") ?? null;
+    // A copy stopped mid-read (reload, quit) leaves its claim behind. Clear it once it expires,
+    // so every copy's spinner stops; its late result is still refused by token.
+    if (!this.pending && control?.busyUntil && control.busyUntil <= now) {
+      const { busyUntil: _expired, token: _token, ...rest } = control;
+      put("control", control = rest);
+    }
     const live = this.mode === "strip" ? this.observe(now) : agents();
     if (this.finishedAt && this.finishedAt <= (control?.attempt ?? 0)) this.finishedAt = 0;
     if (this.pending || control?.busyUntil > now) return;
