@@ -125,6 +125,26 @@ start and a program it stopped, so tell the two apart before showing a message.
 quota-axi's own detached helpers (claude-swap, delegated refresh) only run when
 credential refresh is on; keep `--no-credential-refresh`.
 
+Natively, Herdr's `exec` runs a program in Herdr's own process group and, at
+30 s, SIGKILLs that one pid. Its children survive, so never rely on Herdr to
+clean up a subprocess tree, and never signal the supervisor's own group.
+
+`child()` rejects `null` and `undefined` ("child(value) expects an element…").
+Optional parts go through `.when(...)` or `.children([...])`. `herdr-app check`
+renders only the initial (strip) description, so open the dashboard natively
+too before calling a build done.
+
+A dashboard copy lives only while its window is open, so it asks the strip to
+read (`run("agent-quota.look")` / `"agent-quota.refresh"`) and reads itself only
+if nothing was claimed within 4 s. A claim left by a copy stopped mid-read is
+cleared by the strip's 10 s check once it expires.
+
+Herdr's window degraded to 100% CPU (JIT maintenance in `sample`) after a
+session of repeated hot reloads, layout round-trips and dozens of dashboard
+reopens. Install once, relaunch the window gracefully, and measure only on a
+fresh window. Reopening the keyed dashboard window also retained about 0.4 MB
+per reopen in one test (see `VALIDATION.md`).
+
 Limit ids are parsed twice: once in the supervisor and again in Herdr. Keep the
 id bound large enough that a fallback id (kind and label) survives the second
 parse whole.

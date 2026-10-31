@@ -94,14 +94,108 @@ running. Terminals in herdr-core stayed live throughout.
 - Not inspected natively: the gauge layout's dashed arcs and tooltip hover
   (no pointer automation). `npm test`: 64 passing.
 
-## Remaining native checks
+## Remaining native checks (superseded)
 
-The subsequent review and follow-up fixes are documented in
-`PERFORMANCE_REVIEW.md`. That build has not been installed or approved natively.
-Its regression suite passes on Node 24.11.1 and its source type-checks against
-the installed declarations. `herdr-app check` is blocked in this session by
-macOS UI/XPC access and reaches the check script's timeout; desktop access also
-failed to start. Earlier native observations above do not validate the follow-up.
+This section described `394cad9`, which was never installed. *Correction:* it
+said that build "type-checks against the installed declarations". That held only
+with implicit-`any` checks off; see the next section.
+
+## Native verification of the REVIEW-394cad9 fixes, 2026-10-31
+
+Build `90e6cae` on `terminal-redesign`, installed byte-identical (one staged swap)
+over `fbb7f2b`. Herdr 0.1.10, Apple M2, Node 24.11.1, layout `agent-quota` with
+pane headers. Workload throughout: 7 core terminals, namely Claude Code ×2 (one
+working, one done on `splinter`), Codex idle and 4 shells. Measurement: `top -pid`
+1 s samples for 60 s after a 5 s warm-up, plus a 10 s main-thread `sample`.
+
+1. `npm test`: 97 passing. `npm run typecheck`: 0 errors (tsc 5.6.3,
+   `--strict --noImplicitAny false --strictNullChecks false --skipLibCheck`,
+   against `~/.config/herdr-app/gpui-kit.d.ts` with `herdr` mapped to
+   `herdr.d.ts`). Full `--strict`: 359 errors. gpui-shell's `jsconfig.json`
+   settings: 280. All are implicit-`any`/default-parameter inference.
+2. `npm run check`: passed.
+3. Installed with `scripts/install.mjs --headers --no-deps` (one swap per build;
+   legacy `runtime.json`/`installation.json` replaced by hidden files).
+   `herdr-app check` on the installed copy passed, `herdr-app status` showed
+   no errors, and the window relaunched gracefully (`app.quit`, reopen) with all
+   7 terminals kept.
+4. Matched baseline, same workload:
+
+   | Run | CPU mean / median / p90 | Footprint | RSS | Idle wakeups | JS / JIT share of main thread |
+   | --- | --- | --- | --- | --- | --- |
+   | Brief baseline, `fbb7f2b` | 12–13% | 152 MB | 199 MB | ~1.1/s | 2.6% all JS |
+   | `fbb7f2b`, 11 h window, today | 13.0 / 12.9 / 14.3% | 173 MB | 170 MB | 1.4/s | 1.0% / 0.1% |
+   | Stock `main` layout (no quota mod) | 12.3 / 12.1 / 14.0% | 176–178 MB | 163 MB | 1.3/s | 1.2% / 0.5% |
+   | New build, quota layout | 12.6 / 12.5 / 14.1% | 179 MB | 160 MB | 0.9/s | 0.8% / 0.1% |
+   | Final `90e6cae`, fresh window | 12.6 / 12.3 / 13.9% | 176–179 MB | 156 MB | 1.2/s | 0.7% / 0.0% |
+   | Final, dashboard open (30 s) | 13.1 / 12.9 / max 15.8% | — | — | — | — |
+
+   The mod (strip plus 7 pane headers) costs about +0.3 percentage points of one
+   core over the stock layout, which is within the noise and under the < 1 pp
+   target. Footprint is level with the stock layout. With JS under 1% of the
+   main thread, H2 (header scans) and H3 (strip render cache) were measured and
+   left unchanged: in V8 a header costs 13–17 µs at 7, 50 and 200 panes, and the
+   strip 0.05 ms.
+5. Surfaces: the strip, pane headers, the gauge dashboard and Settings rendered
+   natively (`herdr-app shot`). The meter-row layout was not switched during
+   this session, because there is no pointer automation and options can only
+   change through clicks. Reads with the dashboard open, measured from shared
+   state and `ps`:
+   - Opening the dashboard with data older than a minute: the strip claimed
+     the `look` read in 0.12 s and published it in 0.86 s.
+   - Manual Refresh: claimed in 0.06 s, published and released in 0.80 s.
+   - A scheduled `working` read fired 3:00 after the last read and released
+     within about 1 s.
+   - None left a process or a `.runtime/groups` record behind.
+6. Forced failures (fake programs via the hidden `.runtime.json`, restored
+   afterwards):
+   - A hung collector that ignores SIGTERM: the supervisor killed its group at
+     **24.3 s** and showed "ran past its 24-second budget". The group record was
+     removed and no process survived.
+   - A hung runner in place of the supervisor: Herdr stopped it at **30.2 s**
+     with SIGKILL (no trappable signal arrived). Herdr kills only that pid: its
+     same-group child survived, reparented to launchd, and was killed by hand.
+     Herdr starts `exec` programs in **its own process group**. Its rejection
+     produced "Herdr stopped the quota read before it finished". This confirms
+     F1's premise.
+
+Defects found only natively, all fixed with regression tests:
+
+- **The dashboard could not render at all** ("child(value) expects an element…").
+  `pager()` returned `null` for a single page. `herdr-app check` renders only the
+  strip, and the Node host dropped `null` children. `394cad9` had the same
+  defect. Fixed in `9334d36`; `test/host.js` now rejects non-element children.
+- **An orphaned claim kept "Refreshing" up past its expiry.** A copy stopped
+  mid-read (the reload during setup, then a quit) left its claim behind. Fixed in
+  `1280ce7`: the strip's 10 s check clears an expired claim with one write.
+- **A dashboard-owned read was lost when its copy went away.** Reads now run in
+  the long-lived strip (`90e6cae`).
+
+Open issues:
+
+- **Window degradation after churn.** After roughly 6 hot reloads, 3 layout
+  round-trips, a probe mod and about 70 dashboard copies in one window, Herdr's
+  main thread reached 100% CPU and the window stopped answering commands
+  (`sample`: GPUI prepaint, malloc/free, and `rquickjs_jit::ProductionBackend::
+  maintenance` dropping feedback snapshots). That matches the earlier
+  JIT-maintenance incidents. A graceful relaunch restored it; the final build
+  then ran at 12.6%. Reads measured during the degradation published 25–35+ s
+  late, which first looked like an overlay-specific delay; on a fresh window
+  they publish in under 1 s. The cause is not established between Herdr's
+  runtime and the mod.
+- **Memory retained per dashboard reopen.** Reopening the keyed dashboard window
+  70 times, each open replacing the previous copy, grew footprint 182 → 212 MB
+  (malloc, about 2,300 live allocations per reopen) and it was not returned when
+  idle. Controls: 20 open/close cycles of the same dashboard code as a dialog
+  overlay did not grow footprint, and neither did 30 cycles of Herdr's `help`
+  dialog. So the growth follows keyed-window replacement, not the dashboard's
+  rendering. A true close and reopen through ✕/Escape could not be driven
+  without pointer or keyboard automation (Escape could have reached an agent's
+  terminal). Not attributed; needs a Herdr-side look or a manual reopen test.
+- Not exercised natively in this session: the meter-row dashboard layout,
+  Previous/Next with real multi-page data, the light theme, zoom, narrow widths,
+  keyboard navigation, persistence of preferences across a restart, the
+  dashboard's no-strip fallback read, and Windows.
 
 - Compare measurements directly against provider data and test authentication
   recovery without exposing credentials.

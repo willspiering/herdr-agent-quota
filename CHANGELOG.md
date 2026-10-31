@@ -18,6 +18,11 @@
 - Setup writes `.runtime.json`/`.installation.json` (hidden: no reload) and
   swaps changed build files in one step. Run setup again after upgrading.
 - `npm run typecheck` checks against the installed Herdr declarations.
+- Fix (found natively): the dashboard failed to render at all ("child(value)
+  expects an element…") because a single-page pager was `null`.
+- Fix (found natively): an expired claim left by a copy stopped mid-read is now
+  cleared, so the Refresh spinner can't outlive it. The dashboard's reads run in
+  the long-lived strip, so closing the dashboard can't lose a read.
 
 - Performance review follow-up: supervise collection with a 30-second deadline,
   1 MiB output cap and macOS/Linux process-group cleanup; coordinate copies via
