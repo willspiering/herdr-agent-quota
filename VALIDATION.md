@@ -297,3 +297,24 @@ each 60 s sample (`ps` every second; `footprint` at the end).
 - Not checked natively: Grok, Kimi, Cursor and OpenCode Go with a real sign-in
   (none here); Antigravity running; Linux and Windows; Herdr's handling of
   self-signed loopback TLS (Antigravity falls back to http as quota-axi does).
+
+### Matched stock-layout comparison (ABAB), 2026-10-31
+
+Same window, agents and terminals, alternating Herdr's stock `main` layout (no
+quota mod) and the `agent-quota` layout (strip, pane headers, hidden dashboard
+column). Each run: layout switch, 30 s warm-up discarded, 90 s measured with
+`ps` every second, then a 3 s `sample`. No forced Refresh, so both sides see
+the same idle workload; the agent driving the test was waiting, not streaming.
+
+| Run | CPU mean / median / p90 | Max | Herdr RSS | Footprint | JS frames / main-thread samples |
+| --- | --- | --- | --- | --- | --- |
+| stock 1 | 1.8 / 1.6 / 2.4% | 5.7% | 160 MB | 176 MB | 7 / 1,898 |
+| quota 1 | 1.6 / 1.6 / 1.9% | 3.0% | 161 MB | 177 MB | 5 / 1,630 |
+| stock 2 | 1.6 / 1.4 / 2.0% | 4.2% | 161 MB | 177 MB | under 5 / 1,716 |
+| quota 2 | 1.8 / 1.5 / 2.1% | 7.5% | 162 MB | 178 MB | 5 / 1,782 |
+
+The quota layout costs no measurable CPU over stock (both average 1.7%; the
+difference is under the run-to-run spread). Memory is 1–2 MB higher (RSS and
+footprint), the size of the mod's copies. JavaScript is under 0.5% of the main
+thread on both. The earlier 7–13% readings in this session reflected the
+terminal workload of the session driving the test, not the mod.
