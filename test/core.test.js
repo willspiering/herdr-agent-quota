@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseReport, options, windowState, catalog, redlines, pace, elapsed, resetLabel, shortLabel, visibleWindows, reading, QuotaError, CADENCE, STALE_MS, schedule, needsSweep, resetDue, targets, mergeReport } from "../mods/agent-quota/core.js";
-import { collect } from "../mods/agent-quota/collector.js";
+import { collectAxi } from "../mods/agent-quota/collector.js";
 import { integrateLayout } from "../scripts/layout.mjs";
 
 const now = Date.parse("2026-10-30T20:00:00Z");
@@ -106,24 +106,24 @@ test("saved choices override props without dropping other defaults", () => {
 });
 test("collector accepts exit 1 reports and does not repeat provider calls", async () => {
   let calls = 0;
-  const result = await collect(async () => { calls++; return { code: 1, stdout: JSON.stringify(report()), stderr: "SECRET" }; }, runtime, now);
+  const result = await collectAxi(async () => { calls++; return { code: 1, stdout: JSON.stringify(report()), stderr: "SECRET" }; }, runtime, now);
   assert.equal(result.report.providers.length, 1); assert.equal(calls, 1); assert.equal(result.swept, true);
 });
 test("an installation without the supervisor cannot fall back to an unbounded shell", async () => {
   const calls = [];
-  await assert.rejects(collect(async (...args) => { calls.push(args); }, {}, now), /needs setup/);
-  await assert.rejects(collect(async () => { calls.push("once"); throw Error("SECRET"); }, runtime, now), /could not start/);
+  await assert.rejects(collectAxi(async (...args) => { calls.push(args); }, {}, now), /needs setup/);
+  await assert.rejects(collectAxi(async () => { calls.push("once"); throw Error("SECRET"); }, runtime, now), /could not start/);
   assert.deepEqual(calls, ["once"]);
 });
 test("targeted reads use supervised argv and invalid provider ids cause a sweep", async () => {
   const calls = [];
   const runner = async (cmd, args) => { calls.push([cmd, args]); return { code: 0, stdout: JSON.stringify(report()) }; };
-  const result = await collect(runner, runtime, now, ["claude", "codex"]);
+  const result = await collectAxi(runner, runtime, now, ["claude", "codex"]);
   assert.deepEqual(calls[0], ["/node", ["/runner", "/collector", String(now + 30000), "claude", "codex"]]);
   assert.equal(result.swept, false);
-  await collect(runner, runtime, now, ["bad id;rm"]);
+  await collectAxi(runner, runtime, now, ["bad id;rm"]);
   assert.deepEqual(calls[1][1], ["/runner", "/collector", String(now + 30000)]);
-  for (const code of [124, 125, 126]) await assert.rejects(collect(async () => ({ code, stdout: "SECRET" }), runtime, now), QuotaError);
+  for (const code of [124, 125, 126]) await assert.rejects(collectAxi(async () => ({ code, stdout: "SECRET" }), runtime, now), QuotaError);
 });
 test("the scheduler reads after a turn, never closer than a minute", () => {
   const control = { attempt: now - 30000 };
@@ -231,5 +231,5 @@ test("left shows headroom from the same measurement", () => {
 });
 test("collector and parser failures are typed as this mod's own messages", async () => {
   assert.throws(() => parseReport("nope", now), QuotaError);
-  await assert.rejects(collect(async () => ({ code: 2, stdout: "" }), {}, now), QuotaError);
+  await assert.rejects(collectAxi(async () => ({ code: 2, stdout: "" }), {}, now), QuotaError);
 });

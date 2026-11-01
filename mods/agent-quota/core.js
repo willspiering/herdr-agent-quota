@@ -65,6 +65,13 @@ export function parseReport(stdout, now = Date.now()) {
     if (report) break;
   }
   if (!report) throw new QuotaError("Collector returned an unreadable quota report.");
+  return normalizeReport(report, now);
+}
+
+// The allowlist itself, for a report that is already an object: native provider reads build
+// one directly, and every field still passes through the same validation as a parsed report.
+export function normalizeReport(report, now = Date.now()) {
+  if (!report || typeof report !== "object" || !Array.isArray(report.providers)) throw new QuotaError("Collector returned an unreadable quota report.");
   if (![3, 4, 5].includes(report.schemaVersion)) throw new QuotaError("Unsupported quota schema. This version supports schemas 3–5.");
   const generated = stamp(report.generatedAt);
   const at = generated !== null && generated <= now + 60000 ? Math.min(generated, now) : now;

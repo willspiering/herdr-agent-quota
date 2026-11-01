@@ -1,8 +1,9 @@
 import { View, div, svg, image, PathBuilder, Background } from "gpui-kit";
 import { Button, h_flex, v_flex } from "gpui-base";
 import {
-  exec, appHome, readTextFile, knownAgents, agents, spaces, panes,
+  exec, appHome, home, readTextFile, knownAgents, agents, spaces, panes,
   theme, settings, shared, setShared, props, openOverlay, closeOverlay, nextCommand, run, layout,
+  window as appWindow,
 } from "herdr";
 import {
   PREFIX, options, providerId, catalog, visibleWindows, shows, reading, windowState,
@@ -10,6 +11,7 @@ import {
   CADENCE, schedule, needsSweep, resetDue, targets, mergeReport, failure, failureAfter,
 } from "./core.js";
 import { collect, READ_MS } from "./collector.js";
+import { ADAPTERS } from "./providers/index.js";
 
 const key = suffix => `${PREFIX}.${suffix}`;
 /** @returns {any} Application-owned, normalized shared state. */
@@ -199,7 +201,7 @@ export default class AgentQuota extends View {
     run(`agent-quota.${why}`);
     cx.timer.after(DELEGATE_MS, cx => {
       const c = get("control");
-      if ((c?.attempt ?? 0) >= asked || c?.busyUntil > Date.now() || !this.runtime.runner) return;
+      if ((c?.attempt ?? 0) >= asked || c?.busyUntil > Date.now()) return;
       this.tick(cx, options);
     });
   }
@@ -244,9 +246,20 @@ export default class AgentQuota extends View {
       if (get("control")?.token !== token || Date.now() - now >= CLAIM_MS) { this.pending = false; return; }
       const next = { attempt: now, failures: 0, sweptAt: control?.sweptAt ?? 0, discoveredAt: control?.discoveredAt ?? 0, reason };
       let result, error = null;
+      // A background read never raises a Keychain prompt: it reads Claude's Keychain item only once
+      // access is known to work (granted before, or a reading quota-axi already took), and a
+      // Refresh, which the user asked for, may prompt. Only the fact of the grant is kept.
+      const granted = control?.keychain === true || (data?.providers ?? []).some(p => p.id === "claude" && p.windows.length > 0);
+      const keychain = { allowed: granted || reason === "manual", granted };
+      // Native reads use Herdr's fetch and file reads; each request races this task's own timer.
+      const io = { exec, fetch: (url, init) => fetch(url, init), readTextFile, home, platform: appWindow().platform, adapters: ADAPTERS, keychain,
+        sleep: ms => new Promise(resolve => { cx.timer.after(ms, () => resolve()); }) };
       try {
-        result = await collect(exec, this.runtime, Date.now(), ids, now + READ_MS);
-        if (result.swept) next.sweptAt = now;
+        result = await collect(io, this.runtime, Date.now(), ids, now + READ_MS);
+        // A sweep that ran is a sweep, even if one provider failed in it: that provider retries.
+        if (ids === null) next.sweptAt = now;
+        // Any provider failing backs the schedule off, as a failed read always did.
+        if (result.failed) next.failures = (control?.failures ?? 0) + 1;
       } catch (e) {
         // Only this mod's own messages are kept; anything else could echo subprocess output.
         error = e instanceof QuotaError ? e.message.slice(0, 160) : GENERIC_ERROR;
@@ -257,10 +270,14 @@ export default class AgentQuota extends View {
       if (get("control")?.token !== token) { this.pending = false; return; }
       const known = (get("data")?.providers ?? []).map(p => p.axi).filter(Boolean);
       if (result) put("data", mergeReport(get("data"), result.report, result.swept));
-      put("error", failureAfter(get("error"), { message: error, ids: sweep ? null : ids, known }));
+      // What this read replaced is no longer stale; providers it couldn't read keep their earlier
+      // readings and become stale. A read that failed outright leaves everything it covered stale.
+      const after = result ? failureAfter(get("error"), { ids: result.read, known }) : failureAfter(get("error"), { message: error, ids: sweep ? null : ids, known });
+      put("error", result?.failed ? failureAfter(after, { message: result.failed.message, ids: result.failed.ids, known }) : after);
       // Discovery isn't on the collection critical path and never holds its claim open.
       const discover = now - next.discoveredAt >= CADENCE.discover || (reason === "manual" && now - next.discoveredAt >= CADENCE.gap);
       if (discover) next.discoveredAt = now; // rate-limit failures too
+      if (keychain.granted) next.keychain = true;
       put("control", next);
       this.pending = false;
       cx.notify();

@@ -10,7 +10,7 @@ import { createHost, walk, flatten } from "./host.js";
 import * as core from "../mods/agent-quota/core.js";
 const { parseReport, PREFIX } = core;
 const failureAfter = (...args) => core.failureAfter(...args);
-import { collect } from "../mods/agent-quota/collector.js";
+import { collectAxi } from "../mods/agent-quota/collector.js";
 import * as supervisor from "../scripts/collector-process.mjs";
 
 const posix = { skip: process.platform === "win32" };
@@ -102,12 +102,12 @@ test("F1: a group orphaned by SIGKILL is reaped by the next read", posix, async 
 
 test("F1: a read stopped by Herdr says so instead of asking for setup", async () => {
   const runtime = { node: "/node", runner: "/runner", collector: "/collector" };
-  const stopped = collect(async () => { throw new Error("/node took longer than 30 s and was stopped"); }, runtime);
+  const stopped = collectAxi(async () => { throw new Error("/node took longer than 30 s and was stopped"); }, runtime);
   await assert.rejects(stopped, e => /stopped/i.test(e.message) && !/setup/i.test(e.message));
   for (const code of [137, 143, -1]) {
-    await assert.rejects(collect(async () => ({ code, stdout: "" }), runtime), e => !/setup/i.test(e.message), `code ${code}`);
+    await assert.rejects(collectAxi(async () => ({ code, stdout: "" }), runtime), e => !/setup/i.test(e.message), `code ${code}`);
   }
-  await assert.rejects(collect(async () => { throw new Error("No such file or directory"); }, runtime), /could not start/);
+  await assert.rejects(collectAxi(async () => { throw new Error("No such file or directory"); }, runtime), /could not start/);
 });
 
 test("F1: the claim outlives the longest possible read, which ends by Herdr's cap", async () => {
@@ -234,6 +234,10 @@ test("H1: setup stages the build and swaps only changed files in one step", asyn
     assert.deepEqual((await rd(target)).sort(), [".runtime.json", "core.js", "main.js", "mod.json"]);
     assert.deepEqual((await rd(dir)).sort(), ["mod", "src"]); // staging cleaned up
     assert.equal(await swapBuild(source, target, staging, ["runtime.json"]), 0); // idempotent: no writes
+    // Provider modules live in a subfolder and move in with the same swap.
+    await md(join(source, "providers")); await wf(join(source, "providers", "claude.js"), "x");
+    assert.equal(await swapBuild(source, target, staging, []), 1);
+    assert.equal(await rf(join(target, "providers", "claude.js"), "utf8"), "x");
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 

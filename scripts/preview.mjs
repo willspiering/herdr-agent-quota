@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const stripImports = s => s.replace(/import[\s\S]*?from\s+"[^";]+";/g, "").replaceAll("export default class", "class").replaceAll("export ", "");
+const stripImports = s => s.replace(/import[\s\S]*?from\s+"[^";]+";/g, "").replace(/^export \{[^}]*\};?$/gm, "").replaceAll("export default class", "class").replaceAll("export ", "");
 const core = stripImports(await readFile(join(root, "mods/agent-quota/core.js"), "utf8"));
 const collector = stripImports(await readFile(join(root, "mods/agent-quota/collector.js"), "utf8"));
 const main = stripImports(await readFile(join(root, "mods/agent-quota/main.js"), "utf8"));
@@ -22,7 +22,7 @@ const dark={foreground:'#e5e7ec',muted:'#abb0bc',dim:'#888e9b',border:'#363940',
 const light={...dark,foreground:'#20242c',muted:'#505a69',dim:'#596372',border:'#cdd2db',input:'#8b95a4',accent:'#3768a0',popover:'#f9fafc',surface:'#edf0f4',chrome:'#eff1f5',background:'#f9fafc',selected:'#dce5f2',hover:'#e5eaf1',working:'#79530c',blocked:'#ad302d',done:'#226b50',idle:'#505a69'};
 let scenario='normal',storage={},properties={},currentTheme=dark;
 const shared=k=>storage[k],setShared=(k,v)=>{storage[k]=v;queueMicrotask(render)},props=()=>properties,theme=()=>currentTheme,settings=()=>({dark:scenario!=='light'});
-const appHome=()=>'',exec=async()=>({code:127}),readTextFile=async()=>null,knownAgents=async()=>[],nextCommand=()=>new Promise(()=>{}),closeOverlay=()=>{},openOverlay=()=>{},run=()=>{};
+class ReadFailure extends Error{};const ADAPTERS=[],home=()=>'',appWindow=()=>({platform:'macos'}),appHome=()=>'',exec=async()=>({code:127}),readTextFile=async()=>null,knownAgents=async()=>[],nextCommand=()=>new Promise(()=>{}),closeOverlay=()=>{},openOverlay=()=>{},run=()=>{};
 const activity=[{address:'t1',space:'s1',space_name:'Personal',tab_name:'Build quota',program:{key:'codex'},status:'working',focused:true},{address:'t2',space:'s2',space_name:'Example project',tab_name:'Review',program:{key:'claude'},status:'blocked'},{address:'remote/t3',space:'s3',space_name:'Practice',tab_name:'Research',program:{key:'grok'},status:'idle'}];
 const agents=()=>scenario==='empty'?[]:activity,spaces=()=>[{id:'s1'},{id:'s2'},{id:'s3',machine:'remote'}],panes=()=>[];
 const cx={focus_handle:()=>({focus(){},is_focused:()=>false}),notify:()=>queueMicrotask(render),stop_propagation(){},spawn(){},timer:{every(){}}};

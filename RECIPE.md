@@ -56,8 +56,9 @@ One mod, `mods/agent-quota`, with `place: none`. The same View renders strip,
 dashboard or optional header using `props().mode`. Use Herdr's `knownAgents`,
 `agents`, `spaces` and `panes`; never scrape terminals. `core.js` handles
 quota schema 3–5, account lanes, visibility, activity ranking and freshness.
-`collector.js` executes quota-axi. Only the strip schedules reads: an in-memory
-check every 10 s compares agent statuses and runs `quota-axi` only when
+`collector.js` reads Claude and Codex natively (`providers/`, Herdr's `fetch`)
+and the remaining providers through quota-axi. Only the strip schedules reads: an in-memory
+check every 10 s compares agent statuses and reads only when
 `schedule()` in `core.js` says one is due. Triggers: an agent finishing a turn
 (working → anything else), a limit reset passing, the dashboard opening on
 data over 60 s old, Refresh, a 3-minute backstop while any agent works and a

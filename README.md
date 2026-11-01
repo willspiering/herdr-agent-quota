@@ -25,19 +25,20 @@ layout, colors, redline, and which providers and limits show. Changes apply
 immediately with a live preview. Quota availability depends on each provider
 and your sign-in.
 
-Each quota read runs quota-axi under a small Node supervisor. It finishes in
-under 24 s (Herdr stops any program at 30 s) and leaves no process behind.
-quota-axi is passed `--no-credential-refresh` and never makes inference
-requests.
+Claude and Codex are read directly with Herdr's built-in `fetch`, from the
+same usage endpoints their CLIs use: no subprocess, no Node. The mod reads
+your existing sign-in (Claude Code's Keychain item or `~/.claude/.credentials.json`,
+and `~/.codex/auth.json`), never refreshes a token, and never makes inference
+requests. Tokens are used only for that request and never stored. Other providers
+are still read by quota-axi under a small Node supervisor (finishing in under
+24 s, leaving no process behind) until they are moved over too.
 
 Optional keys in `keys.json`: `"agent-quota.open"`, `"agent-quota.settings"`
 and `"agent-quota.refresh"`.
 
-For Claude on macOS, you may need a one-time Keychain grant:
-
-```sh
-./node_modules/.bin/quota-axi --provider claude --allow-keychain-prompt --no-credential-refresh
-```
+For Claude on macOS, background reads never raise a Keychain prompt. If the
+dashboard asks for a Keychain approval, press Refresh once and allow access;
+the mod remembers that the grant works (never the secret itself).
 
 ## Development
 
