@@ -141,7 +141,7 @@ test("grok tries valid sign-ins before expired ones, then Pi's xAI sign-in", asy
 
 test("grok: outages, rate limits and odd answers keep earlier readings", async () => {
   const files = { [GROK_AUTH]: signIn() };
-  const routes = [[500, ""], [429, ""], [200, ""], [200, "@@@ not base64 ünïcode"], [200, b64([1, 2, 3])],
+  const routes = [[500, ""], [429, ""], [200, "@@@ not base64 ünïcode"], [200, b64([1, 2, 3])],
     [200, answer(Uint8Array.from(field(1, 2, [])))], [200, b64(trailer("grpc-status:8\r\n"))], [200, b64(trailer("grpc-status:13\r\n"))],
     [200, answer(body, "grpc-status:99\r\n")]];
   for (const route of routes) await assert.rejects(grok.read(fakeIo({ files, routes: { [QUOTA]: route } })), failsWith(), JSON.stringify(route));
@@ -195,4 +195,11 @@ test("grok's windows match quota-axi's normalizer, pace included", () => {
     assert.throws(() => normalizeGrokConsumerPayload(bad));
     assert.throws(() => grok.usageWindows(bad, now), ReadFailure);
   }
+});
+// grok.com sends a refused sign-in "trailers-only" (status in headers, empty body), as it did for
+// an unauthenticated probe on 2026-10-31. The models check decides instead of a stale failure.
+test("an empty gRPC answer is a refused sign-in, settled by the models check", async () => {
+  const signedOut = await grok.read(fakeIo({ files: { [GROK_AUTH]: oidc() }, routes: { [QUOTA]: [200, ""], [BUILD_MODELS]: [401, "{}"] } }));
+  assert.equal(signedOut.state.status, "auth_required");
+  await assert.rejects(grok.read(fakeIo({ files: { [GROK_AUTH]: oidc() }, routes: { [QUOTA]: [200, ""], [BUILD_MODELS]: [200, "{}"] } })), failsWith());
 });

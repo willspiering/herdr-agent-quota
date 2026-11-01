@@ -262,6 +262,9 @@ async function consumerQuota(io, token, now) {
   let text;
   try { text = await within(io, REQUEST_MS, response.text()); } catch { throw new ReadFailure("malformed"); }
   if (typeof text === "string" && text.length > LIMIT_BYTES * 4 / 3 + 8) throw new ReadFailure("malformed");
+  // grok.com answers a refused sign-in "trailers-only": the gRPC status is in response headers,
+  // which Herdr's fetch doesn't expose, and the body is empty. Let the models check decide.
+  if (text === "") return { refused: true };
   try { return { windows: usageWindows(unframe(bytesOf(text)), now) }; }
   catch (error) {
     if (error instanceof Refused) return { refused: true };

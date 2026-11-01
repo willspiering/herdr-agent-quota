@@ -7,5 +7,6 @@ import * as cursor from "./cursor.js";
 import * as opencodeGo from "./opencode-go.js";
 import * as kimi from "./kimi.js";
 import * as agy from "./agy.js";
+import * as grok from "./grok.js";
 
-export const ADAPTERS = [claude, codex, copilot, cursor, opencodeGo, kimi, agy];
+export const ADAPTERS = [claude, codex, copilot, cursor, opencodeGo, kimi, agy, grok];
