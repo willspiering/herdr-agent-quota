@@ -275,6 +275,14 @@ export function targets(data, discovered = [], live = []) {
   return ids.length ? [...new Set(ids)].sort() : null;
 }
 // A targeted read replaces only the providers it covers; a sweep replaces everything.
+// Readings and stale flags for providers no adapter reads any more (ones only quota-axi
+// supported), which nothing would ever refresh or clear. `readable`: the ids still read.
+export function forgetUnreadable(data, error, readable) {
+  const keep = p => readable.has(p.axi ?? p.id), before = failure(error);
+  const providers = before?.providers ? before.providers.filter(id => readable.has(id)) : null;
+  return { data: data ? { ...data, providers: data.providers.filter(keep) } : data,
+    error: !before ? null : providers === null || providers.length ? { ...before, providers } : null };
+}
 export function mergeReport(previous, next, swept) {
   if (swept || !previous) return next;
   const read = new Set(next.providers.map(p => p.id));

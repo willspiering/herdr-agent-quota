@@ -27,7 +27,11 @@ async function editorSignIn(io) {
     // -init /dev/null: never run the user's ~/.sqliterc, which could redirect the token's output.
     result = await within(io, 5000, io.exec(SQLITE, ["-readonly", "-init", "/dev/null", "-ascii", path,
       `select key, value from ItemTable where key in ('${TOKEN_KEY}', '${PLAN_KEY}');`]));
-  } catch { return { missing: true }; } // no sqlite3 to run
+  } catch (error) {
+    // Too slow (Cursor holding the database): a sign-in may be there, so keep the earlier reading.
+    if (error instanceof ReadFailure) return { unreadable: true };
+    return { missing: true }; // no sqlite3 to run
+  }
   if (result?.code !== 0) {
     // A database that isn't there is a sign-out; one that won't open may still hold a sign-in.
     return /no such file|unable to open database/i.test(result?.stderr ?? "") ? { missing: true } : { unreadable: true };

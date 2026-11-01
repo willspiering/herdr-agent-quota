@@ -8,7 +8,7 @@ import {
 import {
   PREFIX, options, providerId, catalog, visibleWindows, shows, reading, windowState,
   elapsed, pace, resetLabel, shortLabel, redlines, ageLabel, remoteAgent, QuotaError,
-  CADENCE, schedule, needsSweep, resetDue, targets, mergeReport, failure, failureAfter,
+  CADENCE, schedule, needsSweep, resetDue, targets, mergeReport, failure, failureAfter, forgetUnreadable,
 } from "./core.js";
 import { collect, READ_MS } from "./collector.js";
 import { ADAPTERS } from "./providers/index.js";
@@ -246,11 +246,11 @@ export default class AgentQuota extends View {
       let result, error = null;
       // A background read never raises a Keychain prompt: each provider reads its own Keychain item
       // only once that item has been read successfully before, and a Refresh, which the user asked
-      // for, may prompt. Only the fact of each grant is kept; a denial forgets it. Builds before
-      // this one recorded Claude's as `keychain: true`, and quota-axi could only have read Claude
-      // on macOS through its Keychain item, so a Claude reading also counts.
-      const before = new Set([...(control?.keychains ?? []), ...(control?.keychain === true ? ["claude"] : []),
-        ...((data?.providers ?? []).some(p => p.id === "claude" && p.windows.length > 0) ? ["claude"] : [])]);
+      // for, may prompt. Only the fact of each grant is kept. Migrating once from older builds
+      // (no `keychains` yet): `keychain: true` meant Claude's, and quota-axi read Claude on macOS
+      // only through its Keychain item, so a Claude reading also counts.
+      const legacy = !Array.isArray(control?.keychains) && (control?.keychain === true || (data?.providers ?? []).some(p => p.id === "claude" && p.windows.length > 0));
+      const before = new Set([...(Array.isArray(control?.keychains) ? control.keychains : []), ...(legacy ? ["claude"] : [])]);
       const grants = {};
       const keychain = id => (grants[id] ??= { allowed: before.has(id) || reason === "manual", granted: false, denied: false });
       // Native reads use Herdr's fetch and file reads; each request races this task's own timer.
@@ -260,8 +260,9 @@ export default class AgentQuota extends View {
         result = await collect(io, Date.now(), ids, now + READ_MS);
         // A sweep that ran is a sweep, even if one provider failed in it: that provider retries.
         if (ids === null) next.sweptAt = now;
-        // Any provider failing backs the schedule off, as a failed read always did.
-        if (result.failed) next.failures = (control?.failures ?? 0) + 1;
+        // A provider failing backs the schedule off, as a failed read always did; one waiting for a
+        // Keychain approval doesn't, since only the user can give it.
+        if (result.failed?.backoff) next.failures = (control?.failures ?? 0) + 1;
       } catch (e) {
         // Only this mod's own messages are kept; anything else could echo a vendor's answer.
         error = e instanceof QuotaError ? e.message.slice(0, 160) : GENERIC_ERROR;
@@ -271,23 +272,20 @@ export default class AgentQuota extends View {
       // A late answer from an expired/replaced claim must not clobber newer readings.
       if (get("control")?.token !== token) { this.pending = false; return; }
       const known = (get("data")?.providers ?? []).map(p => p.axi).filter(Boolean);
-      // A sweep also drops what no provider can read any more: readings quota-axi took for
-      // providers Herdr has no agent for, which nothing would ever refresh or clear.
-      const readable = new Set(ADAPTERS.map(a => a.id)), current = (p) => readable.has(p.axi ?? p.id);
-      const prior = get("data");
-      if (result) put("data", mergeReport(ids === null && prior ? { ...prior, providers: prior.providers.filter(current) } : prior, result.report, result.swept));
+      // A sweep also drops what no provider can read any more (see forgetUnreadable).
+      const swept = ids === null ? forgetUnreadable(get("data"), get("error"), new Set(ADAPTERS.map(a => a.id))) : { data: get("data"), error: get("error") };
+      if (result) put("data", mergeReport(swept.data, result.report, result.swept));
       // What this read replaced is no longer stale; providers it couldn't read keep their earlier
       // readings and become stale. A read that failed outright leaves everything it covered stale.
-      const after = result ? failureAfter(get("error"), { ids: result.read, known }) : failureAfter(get("error"), { message: error, ids: sweep ? null : ids, known });
-      const stale = result?.failed ? failureAfter(after, { message: result.failed.message, ids: result.failed.ids, known }) : after;
-      const left = stale?.providers && ids === null ? stale.providers.filter(id => readable.has(id)) : stale?.providers;
-      put("error", stale && (left === null || left?.length) ? { ...stale, providers: left } : null);
+      const after = result ? failureAfter(swept.error, { ids: result.cleared, known }) : failureAfter(swept.error, { message: error, ids: sweep ? null : ids, known });
+      put("error", result?.failed ? failureAfter(after, { message: result.failed.message, ids: result.failed.ids, known }) : after);
       // Discovery isn't on the collection critical path and never holds its claim open.
       const discover = now - next.discoveredAt >= CADENCE.discover || (reason === "manual" && now - next.discoveredAt >= CADENCE.gap);
       if (discover) next.discoveredAt = now; // rate-limit failures too
-      const kept = [...new Set([...before, ...Object.entries(grants).filter(([, g]) => g.granted).map(([id]) => id)])]
-        .filter(id => !grants[id]?.denied).sort();
-      if (kept.length) next.keychains = kept;
+      // A failed Keychain read forgets a grant only on a Refresh, with the user there to see the
+      // prompt; in the background it may just be a locked Keychain after sleep.
+      next.keychains = [...new Set([...before, ...Object.entries(grants).filter(([, g]) => g.granted).map(([id]) => id)])]
+        .filter(id => !(reason === "manual" && grants[id]?.denied)).sort();
       put("control", next);
       this.pending = false;
       cx.notify();

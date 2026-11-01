@@ -37,8 +37,9 @@ async function signIn(io) {
       if (found && io.keychain) io.keychain.granted = true;
       return found;
     }
-    // 44: no such item for this account; anything else (denied) stops here, and the grant is forgotten.
-    if (result?.code !== 44) { if (io.keychain) io.keychain.denied = true; break; }
+    // 44: no such item for this account. Anything else (refused, locked) keeps the earlier reading
+    // and asks for one approval, rather than showing a sign-out.
+    if (result?.code !== 44) { if (io.keychain) io.keychain.denied = true; throw new ReadFailure("keychain"); }
   }
   return null;
 }

@@ -176,7 +176,7 @@ limit ids and account keys identical to quota-axi's, or saved per-limit choices
 are lost.
 
 Keychain consent is per provider. A background read only reads an item that
-was read successfully before; a Refresh may prompt; a denial forgets the grant.
+was read successfully before; a Refresh may prompt; a refusal during a Refresh forgets the grant (a failure in the background may only be a locked Keychain). Waiting for an approval never backs off other providers.
 Without consent, check only that the item exists (no `-w`), which never prompts.
 Do not display subprocess stderr, vendor error text or raw responses: failure
 reasons are fixed strings. Vendor-supplied names pass through `name()` before

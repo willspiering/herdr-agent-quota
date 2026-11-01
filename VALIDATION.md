@@ -262,3 +262,38 @@ repeated reloads, though that episode was never attributed. 0.1.11 does not chan
 how window overlays live: the guide still says opening a keyed window again replaces
 it, so each open builds a new mod copy, while the column builds its copy once. The
 column stays. The window benchmark was not repeated on 0.1.11.
+
+## Native collection (quota-axi removed), 2026-10-31
+
+Every provider is now read inside Herdr with its built-in `fetch`; no Node
+process runs at any time. Measured on this Mac (Herdr 0.1.11, Node 24.11.1 for
+tooling only), same agents and terminals, one forced Refresh (a full sweep) in
+each 60 s sample (`ps` every second; `footprint` at the end).
+
+| | quota-axi build (`cb75a3c`) | Native build (`5f5d836`) |
+| --- | --- | --- |
+| Processes per read | Node supervisor + Node quota-axi | none (`security` for Claude's Keychain item) |
+| One full read | 0.70 s, **123 MB peak RSS** (`/usr/bin/time -l`) | 0.52 s for all 8 providers, in Herdr |
+| Collector processes seen during the sample | 1 s, 44 MB sampled | 0 |
+| Herdr RSS, mean over 60 s | 177 MB | 156 MB |
+| Herdr footprint, end of sample | 176 MB | 183 MB |
+| Herdr CPU, mean / max | 7.1% / 14.1% | 7.8% / 15.4% |
+| Runtime install | 4.8 MB node_modules (quota-axi, undici, toon, axi-sdk-js, proxy-from-env) | none |
+
+- Footprint is within noise and follows a session of hot reloads (this session
+  installed three builds); RSS fell. Herdr CPU is level within noise: the
+  workload includes this session's own terminal, and a 3 s `sample` showed
+  JavaScript under 1% of Herdr's main thread. A matched stock-layout A/B was not
+  run in this session, so no CPU claim is made beyond "level".
+- Live parity (native adapters against `quota-axi --json --full --no-credential-refresh`
+  on the same sign-ins): Claude, Codex and Copilot identical (limit ids,
+  percentages, plan, account keys); Cursor, Kimi, Grok and OpenCode Go both
+  signed out; Antigravity not running (kept quiet natively, `unavailable` in
+  quota-axi). Providers with no sign-in here were checked only by the offline
+  differential tests against quota-axi's own normalizers.
+- Installed with one swap; `herdr-app status` reported no errors; stored state
+  showed Claude, Codex and Copilot fresh, the Claude Keychain grant carried over
+  (no prompt), and no credential in `shared.json`.
+- Not checked natively: Grok, Kimi, Cursor and OpenCode Go with a real sign-in
+  (none here); Antigravity running; Linux and Windows; Herdr's handling of
+  self-signed loopback TLS (Antigravity falls back to http as quota-axi does).

@@ -232,10 +232,10 @@ test("a background read never opens a Keychain prompt; a Refresh may, and the gr
   asked.keychain = { allowed: true, granted: false };
   assert.equal((await claude.read(asked)).state.status, "fresh");
   assert.equal(asked.keychain.granted, true);
-  // Denied (not "no such item"): no second lookup without the account.
+  // Denied (not "no such item"): no second lookup without the account, and the earlier reading stays.
   const denied = fakeIo({ routes: { [CLAUDE_USAGE]: [200, claudeBody] } });
   denied.exec = async (cmd, args) => { denied.execs.push(args); return { code: 51, stdout: "", stderr: "" }; };
-  assert.equal((await claude.read(denied)).state.status, "auth_required");
+  await assert.rejects(claude.read(denied), e => e instanceof ReadFailure && e.message === "keychain");
   assert.equal(denied.execs.length, 1);
 });
 test("native reads that outlast the read's deadline are given up as failures", async () => {
@@ -248,7 +248,7 @@ test("a denied Keychain read forgets that provider's grant", async () => {
   const io = fakeIo({ routes: { [CLAUDE_USAGE]: [200, claudeBody] } });
   io.keychain = { allowed: true, granted: false, denied: false };
   io.exec = async () => ({ code: 51, stdout: "", stderr: "" });
-  assert.equal((await claude.read(io)).state.status, "auth_required");
+  await assert.rejects(claude.read(io), e => e instanceof ReadFailure && e.message === "keychain");
   assert.equal(io.keychain.denied, true); assert.equal(io.keychain.granted, false);
 });
 test("the strip backs off after a provider fails and remembers a Keychain grant", async () => {
@@ -275,4 +275,36 @@ test("a sweep drops readings and stale flags for providers no adapter can read a
   await host.tasks.splice(-1)[0](host.cx);
   assert.deepEqual(host.state[`${PREFIX}.data`].providers.map(p => p.id), ["codex"]);
   assert.equal(host.state[`${PREFIX}.error`], null);
+});
+
+test("waiting for a Keychain approval doesn't back off other providers, and is only forgotten on a Refresh", async () => {
+  const before = normalizeReport({ schemaVersion: 5, generatedAt: iso(now - 600000), providers: [
+    { provider: "codex", accountKeys: ["codex-home"], state: { status: "fresh" }, windows: [{ id: "weekly", label: "week", kind: "weekly", percentUsed: 5 }] }] }, now);
+  const fetcher = async url => url === CODEX_USAGE ? { status: 200, ok: true, json: async () => codexBody } : Promise.reject(new Error("offline"));
+  const files = { "/home/tester/.codex/auth.json": codexAuth() };
+  // Background read, Claude's item never granted: a "keychain" failure, no backoff.
+  const host = await createHost({ mode: "strip", data: before, adapters: [claude, codex], fetcher, files, runner: async () => ({ code: 51, stdout: "", stderr: "" }) });
+  host.state[`${PREFIX}.control`] = { attempt: Date.now() - 700000, sweptAt: 0, keychains: [] };
+  host.view.tick(host.cx);
+  await host.tasks.splice(-1)[0](host.cx);
+  let control = host.state[`${PREFIX}.control`];
+  assert.equal(control.failures, 0);
+  assert.match(host.state[`${PREFIX}.error`].message, /Keychain approval/);
+  // A granted item that fails in the background (locked after sleep) keeps its grant.
+  host.state[`${PREFIX}.control`] = { attempt: Date.now() - 700000, sweptAt: 0, keychains: ["claude"] };
+  host.view.tick(host.cx);
+  await host.tasks.splice(-1)[0](host.cx);
+  assert.deepEqual(host.state[`${PREFIX}.control`].keychains, ["claude"]);
+  // The same failure on a Refresh forgets it.
+  host.state[`${PREFIX}.control`] = { attempt: Date.now() - 700000, sweptAt: Date.now(), keychains: ["claude"] };
+  host.view.tick(host.cx, { force: true });
+  await host.tasks.splice(-1)[0](host.cx);
+  assert.deepEqual(host.state[`${PREFIX}.control`].keychains, []);
+});
+test("failure messages keep their instruction however many providers fail", async () => {
+  const down = ["Claude", "Codex", "GitHub Copilot", "Cursor", "Grok", "Kimi", "OpenCode Go", "Antigravity"].map((label, i) => ({ id: `p${i}`, label, read: () => { throw new Error("x"); } }));
+  const ok = { id: "ok", label: "OK", read: async () => ({ provider: "ok", accountKeys: ["default"], state: { status: "fresh" }, windows: [] }) };
+  const result = await collect({ adapters: [...down, ok], sleep: () => new Promise(() => {}) }, now, null);
+  assert.match(result.failed.message, /^Claude, Codex and 6 more: quota could not be read\. Earlier readings were kept; retries back off\.$/);
+  assert.equal(result.failed.ids.length, 8); // a synchronous throw fails only that provider
 });

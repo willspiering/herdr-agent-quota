@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseReport, options, windowState, catalog, redlines, pace, elapsed, resetLabel, shortLabel, visibleWindows, reading, QuotaError, CADENCE, STALE_MS, schedule, needsSweep, resetDue, targets, mergeReport } from "../mods/agent-quota/core.js";
+import { forgetUnreadable, parseReport, options, windowState, catalog, redlines, pace, elapsed, resetLabel, shortLabel, visibleWindows, reading, QuotaError, CADENCE, STALE_MS, schedule, needsSweep, resetDue, targets, mergeReport } from "../mods/agent-quota/core.js";
 import { collect } from "../mods/agent-quota/collector.js";
 import { integrateLayout } from "../scripts/layout.mjs";
 
@@ -236,4 +236,13 @@ test("untrusted limit ids are honored where quota-axi puts them, under state", (
     windows: [{ id: "usage", label: "usage", kind: "unknown", percentUsed: 40 }] }] };
   const w = parseReport(JSON.stringify(raw)).providers[0].windows[0];
   assert.equal(w.trusted, false); assert.equal(w.percentUsed, null);
+});
+
+test("readings and stale flags for providers no adapter reads are forgotten", () => {
+  const data = parse(report([provider({ provider: "zai" }), provider({ provider: "codex" })]));
+  const out = forgetUnreadable(data, { message: "m", providers: ["zai"] }, new Set(["codex"]));
+  assert.deepEqual(out.data.providers.map(p => p.id), ["codex"]);
+  assert.equal(out.error, null);
+  assert.deepEqual(forgetUnreadable(data, { message: "m", providers: null }, new Set(["codex"])).error, { message: "m", providers: null });
+  assert.deepEqual(forgetUnreadable(null, null, new Set()), { data: null, error: null });
 });
