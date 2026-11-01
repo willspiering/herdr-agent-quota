@@ -24,8 +24,9 @@ async function editorSignIn(io) {
   if (!path) return { missing: true };
   let result;
   try {
-    result = await io.exec(SQLITE, ["-readonly", "-ascii", path,
-      `select key, value from ItemTable where key in ('${TOKEN_KEY}', '${PLAN_KEY}');`]);
+    // -init /dev/null: never run the user's ~/.sqliterc, which could redirect the token's output.
+    result = await within(io, 5000, io.exec(SQLITE, ["-readonly", "-init", "/dev/null", "-ascii", path,
+      `select key, value from ItemTable where key in ('${TOKEN_KEY}', '${PLAN_KEY}');`]));
   } catch { return { missing: true }; } // no sqlite3 to run
   if (result?.code !== 0) {
     // A database that isn't there is a sign-out; one that won't open may still hold a sign-in.
@@ -77,7 +78,7 @@ async function cliSignIn(io) {
   let result;
   try { result = await io.exec("/usr/bin/security", ["find-generic-password", ...KEYCHAIN, "-w"]); } catch { throw new ReadFailure("keychain"); }
   if (result?.code === 44) return { missing: true };
-  if (result?.code !== 0) throw new ReadFailure("keychain"); // denied or timed out
+  if (result?.code !== 0) { if (io.keychain) io.keychain.denied = true; throw new ReadFailure("keychain"); } // denied or timed out
   if (io.keychain) io.keychain.granted = true;
   const token = String(result.stdout ?? "").trim();
   return token ? { token } : { unreadable: true };

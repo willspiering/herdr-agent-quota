@@ -89,7 +89,7 @@ async function cliToken(io) {
   let result;
   // Without consent only the item's presence is checked, which never shows a prompt.
   try { result = await io.exec("/usr/bin/security", allowed ? [...args, "-w"] : args); } catch { return { unavailable: true }; }
-  if (result?.code !== 0) return { unavailable: true };
+  if (result?.code !== 0) { if (allowed && result?.code !== 44 && io.keychain) io.keychain.denied = true; return { unavailable: true }; }
   if (!allowed) return { consent: true };
   const token = String(result.stdout ?? "").replace(/[\r\n]+$/, "");
   if (token.length > TOKEN_LIMIT || !/^(?:gho_|ghu_|github_pat_)[A-Za-z0-9_]+$/.test(token)) return { unavailable: true };

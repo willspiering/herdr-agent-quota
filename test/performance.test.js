@@ -2,13 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHost, walk, flatten } from "./host.js";
 import { parseReport, PREFIX, catalog, options } from "../mods/agent-quota/core.js";
-import { runBounded } from "../scripts/collector-process.mjs";
-import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 
-const runtime = { node: "/node", runner: "/runner", collector: "/collector" };
+// One fake native provider: `read` decides when and what it answers.
+const lane = { provider: "codex", accountKeys: ["default"], state: { status: "fresh" }, windows: [{ id: "week", label: "week", kind: "weekly", percentUsed: 60 }] };
+const provider = read => [{ id: "codex", label: "Codex", read }];
 const now = Date.now();
 const raw = { schemaVersion: 5, generatedAt: new Date(now).toISOString(), providers: [{ provider: "codex", state: { status: "fresh" }, windows: [{ id: "week", kind: "weekly", percentUsed: 60 }] }] };
 const data = parseReport(JSON.stringify(raw));
@@ -18,40 +15,37 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
 test("independent module copies share a single claim before any asynchronous work", async () => {
   const clock = { now }, state = { [`${PREFIX}.data`]: data }, wait = deferred();
   let calls = 0;
-  const runner = () => { calls++; return wait.promise; };
-  const strip = await createHost({ mode: "strip", sharedState: state, clock, runner });
-  const dash = await createHost({ sharedState: state, clock, runner });
-  strip.view.runtime = dash.view.runtime = runtime;
+  const adapters = provider(() => { calls++; return wait.promise; });
+  const strip = await createHost({ mode: "strip", sharedState: state, clock, adapters });
+  const dash = await createHost({ sharedState: state, clock, adapters });
   strip.view.tick(strip.cx);
   dash.view.tick(dash.cx, { force: true });
   assert.equal(strip.tasks.length, 3); assert.equal(dash.tasks.length, 1);
   const pending = strip.tasks[2](strip.cx);
   dash.view.tick(dash.cx, { force: true });
-  await new Promise(r => setImmediate(r)); // Herdr's exec starts asynchronously
+  await new Promise(r => setImmediate(r)); // the read starts asynchronously
   assert.equal(calls, 1);
-  wait.resolve({ code: 0, stdout: JSON.stringify(raw) }); await pending;
+  wait.resolve(lane); await pending;
   assert.ok(!state[`${PREFIX}.control`].busyUntil);
 });
 
 test("a retired collection cannot write state or launch discovery after await", async () => {
   const wait = deferred();
-  const host = await createHost({ data, runner: () => wait.promise });
-  host.view.runtime = runtime;
+  const host = await createHost({ data, adapters: provider(() => wait.promise) });
   host.view.tick(host.cx);
   const work = host.tasks.at(-1)(host.cx);
   const before = host.writes.length;
   host.cx.phase = () => { throw Error("retired"); };
-  wait.resolve({ code: 0, stdout: JSON.stringify(raw) });
+  wait.resolve(lane);
   await assert.rejects(work, /retired/);
   assert.equal(host.writes.length, before);
   assert.equal(host.tasks.length, 2);
 });
 
-test("an expired queued collection never starts a subprocess", async () => {
+test("an expired queued collection never starts a read", async () => {
   let calls = 0;
   const clock = { now };
-  const host = await createHost({ clock, runner: () => { calls++; } });
-  host.view.runtime = runtime; host.view.tick(host.cx);
+  const host = await createHost({ clock, adapters: provider(async () => { calls++; return lane; }) }); host.view.tick(host.cx);
   clock.now += 45001;
   await host.tasks.at(-1)(host.cx);
   assert.equal(calls, 0); assert.equal(host.view.pending, false);
@@ -59,15 +53,15 @@ test("an expired queued collection never starts a subprocess", async () => {
 
 test("an expired claim recovers and its late result cannot replace a newer claim", async () => {
   const clock = { now }, state = {}, wait = deferred();
-  const old = await createHost({ sharedState: state, clock, runner: () => wait.promise });
-  old.view.runtime = runtime; old.view.tick(old.cx);
+  const old = await createHost({ sharedState: state, clock, adapters: provider(() => wait.promise) });
+  old.view.tick(old.cx);
   const work = old.tasks.at(-1)(old.cx), oldToken = state[`${PREFIX}.control`].token;
   clock.now += 45001;
   const next = await createHost({ sharedState: state, clock });
-  next.view.runtime = runtime; next.view.tick(next.cx);
+  next.view.tick(next.cx);
   assert.notEqual(state[`${PREFIX}.control`].token, oldToken);
   const writes = old.writes.length;
-  wait.resolve({ code: 0, stdout: JSON.stringify(raw) }); await work;
+  wait.resolve(lane); await work;
   assert.equal(old.writes.length, writes);
   assert.equal(state[`${PREFIX}.data`], undefined);
 });
@@ -149,55 +143,4 @@ test("session rows are bounded and subsequent agents remain reachable", async ()
 test("oversized report structures fail explicitly instead of silently hiding accounts or limits", () => {
   assert.throws(() => parseReport(JSON.stringify({ ...raw, providers: Array.from({ length: 201 }, (_, i) => ({ ...raw.providers[0], accountKey: `${i}` })) })), /too many account/);
   assert.throws(() => parseReport(JSON.stringify({ ...raw, providers: [{ ...raw.providers[0], windows: Array.from({ length: 101 }, (_, i) => ({ id: `${i}` })) }] })), /too many limits/);
-});
-
-test("the executable supervisor preserves lane identities, states and argv while dropping raw data", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "quota-supervisor-"));
-  try {
-    const fixture = join(dir, "fixture.mjs"), entry = fileURLToPath(new URL("../scripts/collect.mjs", import.meta.url));
-    const input = { ...raw, providers: [{ ...raw.providers[0], accountKeys: ["a".repeat(150), "b".repeat(150)],
-      token: "SECRET", raw: "SECRET", untrustedWindowIds: ["week"], windows: [{ ...raw.providers[0].windows[0], windowSeconds: 604800, pace: { status: "ahead", timeRemainingPercent: 40 } }] }] };
-    await writeFile(fixture, `if(process.argv.slice(2).join(' ')!=='--json --full --max-age 90s --no-credential-refresh --provider codex') process.exit(2); console.log(${JSON.stringify(JSON.stringify(input))}); process.exitCode=1;`);
-    const result = await runBounded(process.execPath, [entry, fixture, String(Date.now() + 3000), "codex"], { timeout: 3000, grace: 10 });
-    assert.equal(result.code, 1); assert.doesNotMatch(result.stdout, /SECRET|token|"raw"/);
-    const expected = parseReport(JSON.stringify(input)), actual = parseReport(result.stdout);
-    assert.deepEqual(actual, expected);
-    const expired = await runBounded(process.execPath, [entry, "/does-not-exist", String(Date.now() - 1)], { timeout: 1000, grace: 10 });
-    assert.deepEqual(expired, { code: 124, stdout: "" }); // no attempt to launch the missing file
-  } finally { await rm(dir, { recursive: true, force: true }); }
-});
-
-test("supervisor kills a hung child even when it ignores SIGTERM", async () => {
-  const start = performance.now();
-  const result = await runBounded(process.execPath, ["-e", "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)"], { timeout: 150, grace: 25 });
-  assert.deepEqual(result, { code: 124, stdout: "" });
-  assert.ok(performance.now() - start < 3000);
-});
-test("supervisor bounds output and never forwards stderr or partial failure output", async () => {
-  const overflow = await runBounded(process.execPath, ["-e", "process.stdout.write('x'.repeat(65536)); setInterval(()=>{},1000)"], { maxOutput: 1000, timeout: 2000, grace: 10 });
-  assert.deepEqual(overflow, { code: 125, stdout: "" });
-  const failed = await runBounded(process.execPath, ["-e", "console.log('SECRET'); console.error('SECRET'); process.exitCode=2"], { grace: 10 });
-  assert.deepEqual(failed, { code: 2, stdout: "" });
-  const partial = await runBounded(process.execPath, ["-e", "console.log('{}'); console.error('SECRET'); process.exitCode=1"], { grace: 10 });
-  assert.deepEqual(partial, { code: 1, stdout: "{}\n" });
-});
-// F2: the parent's own exit is the result; a helper holding stdout no longer turns it into a timeout.
-test("supervisor returns a finished read and reaps inherited-pipe descendants", { skip: process.platform === "win32" }, async () => {
-  const dir = await mkdtemp(join(tmpdir(), "quota-child-")), pidFile = join(dir, "pid");
-  try {
-    const child = `require('node:fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid)); process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)`;
-    const script = `const {spawn}=require('node:child_process'); console.log('{}'); spawn(process.execPath,['-e',${JSON.stringify(child)}],{stdio:['ignore',1,2]}).unref();`;
-    const start = performance.now();
-    const result = await runBounded(process.execPath, ["-e", script], { timeout: 2000, grace: 25 });
-    assert.deepEqual(result, { code: 0, stdout: "{}\n" });
-    assert.ok(performance.now() - start < 3000);
-    const pid = Number(await readFile(pidFile, "utf8"));
-    assert.ok(Number.isInteger(pid) && pid > 0);
-    let alive = true;
-    for (let i = 0; i < 100 && alive; i++) {
-      try { process.kill(pid, 0); await new Promise(r => setTimeout(r, 10)); }
-      catch (error) { if (error.code !== "ESRCH") throw error; alive = false; }
-    }
-    assert.equal(alive, false, "collector descendant survived the process-group deadline");
-  } finally { await rm(dir, { recursive: true, force: true }); }
 });

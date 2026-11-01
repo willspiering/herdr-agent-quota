@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Account quota gauges and agent activity across Herdr spaces",
+  "description": "Account quota gauges and agent activity across Herdr spaces, read natively with Herdr's fetch",
   "engines": {
     "node": ">=22.19"
   },
@@ -16,10 +16,8 @@
     "preview": "node scripts/preview.mjs",
     "typecheck": "node scripts/typecheck.mjs"
   },
-  "dependencies": {
-    "quota-axi": "0.1.69"
-  },
   "devDependencies": {
+    "quota-axi": "0.1.69",
     "typescript": "^5.6.3"
   }
 }

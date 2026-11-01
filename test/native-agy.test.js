@@ -111,10 +111,10 @@ test("agy falls back to per-model limits when the server has no quota summary", 
   assert.equal((await agy.read(third)).windows.length, 2);
 });
 
-test("agy: nothing running, or Windows, is unavailable without a request", async () => {
+test("agy: nothing running keeps the earlier reading; Windows is unavailable; neither sends a request", async () => {
   const idle = fakeIo({ ps: "  202 /usr/bin/vim\n  404 /Applications/Other.app/Contents/MacOS/language_server\n" });
-  const lane = await agy.read(idle);
-  assert.equal(lane.state.status, "unavailable"); assert.deepEqual(lane.windows, []); assert.deepEqual(lane.accountKeys, ["default"]);
+  // Closed is not a failure: the collector keeps the last reading, which ages to stale.
+  await assert.rejects(agy.read(idle), e => e instanceof ReadFailure && e.message === "not-running");
   assert.equal(idle.requests.length, 0);
   const windows = fakeIo({ platform: "windows" });
   assert.equal((await agy.read(windows)).state.status, "unavailable");
@@ -200,4 +200,8 @@ test("native windows and discovery match quota-axi's for the same Antigravity an
     assert.equal(mine.plan, axi.plan ?? null);
     assert.deepEqual(mine.windows.map(shape), axi.windows.map(shape));
   }
+});
+test("the CSRF token only goes to ports the process holds on loopback or every address", () => {
+  const out = "x 1 u 3u IPv4 0x1 0t0 TCP 192.168.1.5:5000 (LISTEN)\nx 1 u 4u IPv4 0x2 0t0 TCP *:5001 (LISTEN)\nx 1 u 5u IPv4 0x3 0t0 TCP 127.0.0.1:5002 (LISTEN)\nx 1 u 6u IPv6 0x4 0t0 TCP [::1]:5003 (LISTEN)";
+  assert.deepEqual(agy.ports(out), [5001, 5002, 5003]);
 });

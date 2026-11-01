@@ -37,7 +37,8 @@ async function signIn(io) {
       if (found && io.keychain) io.keychain.granted = true;
       return found;
     }
-    if (result?.code !== 44) break; // 44: no such item for this account; anything else (denied) stops here
+    // 44: no such item for this account; anything else (denied) stops here, and the grant is forgotten.
+    if (result?.code !== 44) { if (io.keychain) io.keychain.denied = true; break; }
   }
   return null;
 }

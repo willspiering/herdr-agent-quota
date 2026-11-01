@@ -30,7 +30,7 @@ const percent = v => number(v) === null || v < 0 ? null : Math.min(100, v);
 export const stamp = v => typeof v === "string" && Number.isFinite(Date.parse(v)) ? Date.parse(v) : null;
 export function providerId(value) {
   const id = text(value).toLowerCase();
-  return ({ "claude-code": "claude", "claude code": "claude", "openai-codex": "codex", "cursor-agent": "cursor", "github-copilot": "copilot", "grok-code": "grok", opencode: "opencode-go", antigravity: "agy" })[id] ?? id;
+  return ({ "claude-code": "claude", "claude code": "claude", "openai-codex": "codex", "cursor-agent": "cursor", "github-copilot": "copilot", "grok-code": "grok" })[id] ?? id;
 }
 export function options(start = {}, saved = {}) {
   const o = { ...DEFAULTS, ...start, ...saved };
@@ -86,13 +86,13 @@ export function normalizeReport(report, now = Date.now()) {
     const key = JSON.stringify([id, account]);
     if (lanes.has(key)) throw new QuotaError("Collector returned duplicate account lanes.");
     lanes.add(key);
-    // quota-axi reports these under `state`; native lanes and the supervisor's projection at the top.
+    // quota-axi put these under `state` in readings older builds stored; native lanes at the top.
     const flagged = Array.isArray(p.untrustedWindowIds) ? p.untrustedWindowIds : Array.isArray(p.state?.untrustedWindowIds) ? p.state.untrustedWindowIds : [];
     const untrusted = new Set(flagged);
     const windowIds = new Set();
     if (Array.isArray(p.windows) && p.windows.length > 100) throw new QuotaError("Quota report has too many limits in an account. Previous readings were kept.");
     const windows = (Array.isArray(p.windows) ? p.windows : []).filter(Boolean).map(w => {
-      // Ids round-trip through the supervisor's projection and are parsed twice, so the bound must
+      // Stored readings are parsed again on every load, so the bound must
       // hold a fallback id whole (kind and label, 120 each, JSON-escaped): truncating it on the
       // second parse once collapsed long labels into "duplicate" limits. Same formula as fbb7f2b,
       // so saved per-limit choices keep their keys.

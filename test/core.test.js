@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseReport, options, windowState, catalog, redlines, pace, elapsed, resetLabel, shortLabel, visibleWindows, reading, QuotaError, CADENCE, STALE_MS, schedule, needsSweep, resetDue, targets, mergeReport } from "../mods/agent-quota/core.js";
-import { collectAxi } from "../mods/agent-quota/collector.js";
+import { collect } from "../mods/agent-quota/collector.js";
 import { integrateLayout } from "../scripts/layout.mjs";
 
 const now = Date.parse("2026-10-30T20:00:00Z");
@@ -10,7 +10,9 @@ const provider = (extra = {}) => ({ provider: "codex", state: { status: "fresh",
 const report = (providers = [provider()], schemaVersion = 5) => ({ schemaVersion, generatedAt: new Date(now).toISOString(), providers });
 const parse = r => parseReport(JSON.stringify(r), now);
 const opts = options();
-const runtime = { node: "/node", runner: "/runner", collector: "/collector" };
+// Fake native providers: each answers with one lane, or throws.
+const lane = id => ({ provider: id, accountKeys: ["default"], state: { status: "fresh" }, windows: [{ id: "five_hour", label: "session", kind: "session", percentUsed: 30 }] });
+const fakeIo = (adapters) => ({ adapters, sleep: () => new Promise(() => {}) });
 
 test("schema 5 remaining becomes used without reversing quota", () => {
   const p = parse(report()).providers[0];
@@ -81,7 +83,7 @@ test("running and focused agents rise ahead of favorite order", () => {
 test("unknown installed agents stay visible, remote activity is not local quota", () => {
   const list = catalog(null, [{ key: "opencode", installed: true, name: "OpenCode" }], [{ address: "server/t1", space: "server/s1", program: { key: "grok" }, status: "idle" }], [{ id: "server/s1", machine: "server" }], opts);
   assert.equal(list.find(p => p.id === "grok").remote, true);
-  assert.equal(list.find(p => p.id === "opencode-go").windows.length, 0);
+  assert.equal(list.find(p => p.id === "opencode").windows.length, 0);
 });
 test("per-window and kind choices apply to redline summary", () => {
   const p = parse(report()).providers[0];
@@ -104,26 +106,20 @@ test("saved choices override props without dropping other defaults", () => {
   const o = options({ hidden: ["grok"], kinds: { monthly: false } }, { names: false, kinds: { session: false } });
   assert.deepEqual(o.hidden, ["grok"]); assert.equal(o.kinds.weekly, true); assert.equal(o.kinds.session, false); assert.equal(o.kinds.monthly, false);
 });
-test("collector accepts exit 1 reports and does not repeat provider calls", async () => {
-  let calls = 0;
-  const result = await collectAxi(async () => { calls++; return { code: 1, stdout: JSON.stringify(report()), stderr: "SECRET" }; }, runtime, now);
-  assert.equal(result.report.providers.length, 1); assert.equal(calls, 1); assert.equal(result.swept, true);
-});
-test("an installation without the supervisor cannot fall back to an unbounded shell", async () => {
+test("a sweep asks every provider once and is complete", async () => {
   const calls = [];
-  await assert.rejects(collectAxi(async (...args) => { calls.push(args); }, {}, now), /needs setup/);
-  await assert.rejects(collectAxi(async () => { calls.push("once"); throw Error("SECRET"); }, runtime, now), /could not start/);
-  assert.deepEqual(calls, ["once"]);
+  const adapters = ["claude", "codex"].map(id => ({ id, label: id, read: async () => { calls.push(id); return lane(id); } }));
+  const result = await collect(fakeIo(adapters), now);
+  assert.deepEqual(calls, ["claude", "codex"]); assert.equal(result.swept, true); assert.equal(result.read, null);
+  assert.deepEqual(result.report.providers.map(p => p.id), ["claude", "codex"]);
 });
-test("targeted reads use supervised argv and invalid provider ids cause a sweep", async () => {
+test("targeted reads ask only those providers, and invalid ids cause a sweep", async () => {
   const calls = [];
-  const runner = async (cmd, args) => { calls.push([cmd, args]); return { code: 0, stdout: JSON.stringify(report()) }; };
-  const result = await collectAxi(runner, runtime, now, ["claude", "codex"]);
-  assert.deepEqual(calls[0], ["/node", ["/runner", "/collector", String(now + 30000), "claude", "codex"]]);
-  assert.equal(result.swept, false);
-  await collectAxi(runner, runtime, now, ["bad id;rm"]);
-  assert.deepEqual(calls[1][1], ["/runner", "/collector", String(now + 30000)]);
-  for (const code of [124, 125, 126]) await assert.rejects(collectAxi(async () => ({ code, stdout: "SECRET" }), runtime, now), QuotaError);
+  const adapters = ["claude", "codex"].map(id => ({ id, label: id, read: async () => { calls.push(id); return lane(id); } }));
+  const result = await collect(fakeIo(adapters), now, ["codex"]);
+  assert.deepEqual(calls, ["codex"]); assert.equal(result.swept, false); assert.deepEqual(result.read, ["codex"]);
+  await collect(fakeIo(adapters), now, ["bad id;rm"]);
+  assert.deepEqual(calls, ["codex", "claude", "codex"]);
 });
 test("the scheduler reads after a turn, never closer than a minute", () => {
   const control = { attempt: now - 30000 };
@@ -231,7 +227,9 @@ test("left shows headroom from the same measurement", () => {
 });
 test("collector and parser failures are typed as this mod's own messages", async () => {
   assert.throws(() => parseReport("nope", now), QuotaError);
-  await assert.rejects(collectAxi(async () => ({ code: 2, stdout: "" }), {}, now), QuotaError);
+  // A provider's own error never reaches the message: only this mod's words do.
+  const broken = [{ id: "claude", label: "Claude", read: async () => { throw new Error("token=SECRET"); } }];
+  await assert.rejects(collect(fakeIo(broken), now), e => e instanceof QuotaError && !e.message.includes("SECRET"));
 });
 test("untrusted limit ids are honored where quota-axi puts them, under state", () => {
   const raw = { schemaVersion: 5, generatedAt: new Date().toISOString(), providers: [{ provider: "kimi", state: { status: "fresh", untrustedWindowIds: ["usage"] },

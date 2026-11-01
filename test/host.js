@@ -95,7 +95,7 @@ export function cappedExec(runner, { cap = EXEC_CAP_MS, onStop = () => {} } = {}
   });
 }
 
-export async function createHost({ nextCommand = () => new Promise(() => {}), mode = "dashboard", data = null, live = [], installed = [], paneList = [], spaceList = [], runtime = {}, runtimeFile = null, runner, sharedState, clock, source: inputSource, coreModule = core, collectorModule = collector, execCap = EXEC_CAP_MS, layoutTree = null, adapters = [], files = {}, fetcher = async () => { throw Error("No network in tests"); } } = {}) {
+export async function createHost({ nextCommand = () => new Promise(() => {}), mode = "dashboard", data = null, live = [], installed = [], paneList = [], spaceList = [], runtime = {}, runner, sharedState, clock, source: inputSource, coreModule = core, collectorModule = collector, execCap = EXEC_CAP_MS, layoutTree = null, adapters = [], files = {}, fetcher = async () => { throw Error("No network in tests"); } } = {}) {
   const source = inputSource ?? await readFile(new URL("../mods/agent-quota/main.js", import.meta.url), "utf8");
   const state = sharedState ?? { [`${core.PREFIX}.data`]: copy(data), [`${core.PREFIX}.discovered`]: copy(installed) };
   const properties = { mode, ...runtime };
@@ -115,7 +115,7 @@ export async function createHost({ nextCommand = () => new Promise(() => {}), mo
   };
   const api = {
     exec: cappedExec(runner ?? (async () => { throw Error("Not installed"); }), { cap: execCap }),
-    appHome: () => "/preview", readTextFile: async path => path in files ? files[path] : runtimeFile && JSON.stringify(runtimeFile),
+    appHome: () => "/preview", readTextFile: async path => files[path] ?? null,
     knownAgents: async () => installed, agents: () => (reads.agents++, live), spaces: () => (reads.spaces++, spaceList), panes: () => paneList,
     theme: () => palette, settings: () => ({ dark: true, font_family: "JetBrains Mono" }),
     shared: name => { sharedReads.push(name); return copy(state[name]); },

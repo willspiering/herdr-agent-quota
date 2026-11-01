@@ -66,8 +66,8 @@ test("cursor reads the editor's state.vscdb read-only and reports quota-axi's li
   assert.equal(io.execs.length, 1);
   const [cmd, ...args] = io.execs[0];
   assert.equal(cmd, "/usr/bin/sqlite3");
-  assert.deepEqual(args.slice(0, 3), ["-readonly", "-ascii", DB]);
-  assert.ok(!args[3].includes("cachedEmail"), "the cached email is never read");
+  assert.deepEqual(args.slice(0, 5), ["-readonly", "-init", "/dev/null", "-ascii", DB]); // never the user's ~/.sqliterc
+  assert.ok(!args[5].includes("cachedEmail"), "the cached email is never read");
   assert.deepEqual(io.requests.map(r => [r.url, r.method, r.body]), [[USAGE, "POST", "{}"], [PLAN, "POST", "{}"], [SAND, "POST", "{}"]]);
   for (const r of io.requests) { assert.equal(r.headers.authorization, `Bearer ${TOKEN}`); assert.equal(r.headers["connect-protocol-version"], "1"); }
   assert.equal(lane.provider, "cursor"); assert.equal(lane.label, "Cursor");
@@ -112,7 +112,7 @@ test("cursor reads the CLI auth.json on Linux and the editor database at its XDG
   assert.equal(lane.windows.length, 5);
   const editor = fakeIo({ platform: "linux", sqlite: { code: 0, stdout: editorRows(), stderr: "" }, routes: ok });
   await cursor.read(editor);
-  assert.equal(editor.execs[0][3], LINUX_DB);
+  assert.equal(editor.execs[0][5], LINUX_DB);
 });
 
 test("cursor without any sign-in is signed out, with no Keychain read and no request", async () => {

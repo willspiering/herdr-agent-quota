@@ -152,11 +152,14 @@ export function processes(output) {
   }
   return found;
 }
-/** Listening TCP ports in `lsof -iTCP -sTCP:LISTEN` output. */
+/** Listening TCP ports in `lsof -iTCP -sTCP:LISTEN` output, on loopback or every address only:
+ *  the CSRF token goes to 127.0.0.1, so a port the process holds only on another address could
+ *  be someone else's on loopback. */
 export function ports(output) {
   const found = new Set();
   for (const line of output.split(/\r?\n/)) {
-    const m = line.match(/TCP\s+(?:\[[^\]]+\]|[^:]+):(\d+)\s+\(LISTEN\)/), port = m ? Number(m[1]) : 0;
+    const m = line.match(/TCP\s+(\[[^\]]+\]|[^:]+):(\d+)\s+\(LISTEN\)/), port = m ? Number(m[2]) : 0;
+    if (!m || !/^(?:127\.0\.0\.1|localhost|\*|\[::1\]|\[::\]|\[\*\])$/i.test(m[1])) continue;
     if (port > 0 && port <= 65535) found.add(port);
   }
   return [...found];
@@ -179,10 +182,11 @@ async function endpoints(io) {
   const lsof = io.platform === "linux" ? "/usr/bin/lsof" : "/usr/sbin/lsof";
   const found = [];
   let failure = null;
-  for (const p of list) {
-    let open;
-    try { open = ports(await run(io, PORT_MS, lsof, ["-nP", "-a", "-p", String(p.pid), "-iTCP", "-sTCP:LISTEN"])); }
-    catch (error) { failure = stronger(failure, error); continue; }
+  // One lsof per process, side by side, so several processes don't use up the probe's budget.
+  const listed = await Promise.all(list.map(p => run(io, PORT_MS, lsof, ["-nP", "-a", "-p", String(p.pid), "-iTCP", "-sTCP:LISTEN"]).then(out => ({ open: ports(out), error: null }), error => ({ open: [], error }))));
+  for (const [i, p] of list.entries()) {
+    const { open, error } = listed[i];
+    if (error) { failure = stronger(failure, error); continue; }
     const add = (scheme, port, csrf, probe) => found.push({ scheme, port, source: p.source, csrf, probe });
     if (p.source === "agy") { for (const port of open) { add("https", port); add("http", port); } continue; }
     if (p.csrf) for (const port of open) { add("https", port, p.csrf, true); add("http", port, p.csrf, true); }
@@ -271,8 +275,9 @@ export async function read(io) {
     if (e.message === "csrf") return unavailable();
     throw e;
   }
-  // Nothing running: Antigravity isn't open (or isn't installed), so there is nothing to read.
-  if (!found) return unavailable();
+  // Nothing running: Antigravity isn't open (or isn't installed). Its earlier reading stays and
+  // ages to stale, as quota-axi's cached one did; the collector doesn't count this as a failure.
+  if (!found) throw new ReadFailure("not-running");
   const result = lane(id, label, now, { plan: found.plan, windows: found.windows });
   // quota-axi marks a reading whose reset has already passed as stale.
   if (found.windows.some(w => w.resetsAt && Date.parse(w.resetsAt) <= now)) result.state = { ...result.state, status: "stale", stale: true };

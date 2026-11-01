@@ -152,45 +152,56 @@ test("pace follows quota-axi: within a point is on pace, less headroom than time
   assert.equal(jwtPayload("not-a-jwt"), undefined);
 });
 
-// Collector routing: native providers by fetch, the rest by quota-axi, one report.
-const axiAnswer = ids => JSON.stringify({ schemaVersion: 5, generatedAt: iso(now), providers: ids.map(provider => ({ provider, state: { status: "auth_required" }, windows: [] })) });
-const runtime = { node: "/node", collector: "/quota-axi", runner: "/runner" };
+// The collector: every provider read natively, side by side, one report.
 function routedIo(extra = {}) {
   const runs = [];
   const io = { ...fakeIo({ keychain: claudeSecret(), files: { "/Users/tester/.codex/auth.json": codexAuth() }, routes: { [CLAUDE_USAGE]: [200, claudeBody], [CODEX_USAGE]: [200, codexBody] }, ...extra }),
     adapters: [claude, codex] };
-  io.exec = async (cmd, args) => {
-    if (cmd === "/usr/bin/security") return { code: 0, stdout: claudeSecret(), stderr: "" };
-    runs.push(args); return { code: 0, stdout: axiAnswer(args.slice(3)), stderr: "" };
-  };
+  io.exec = async (cmd, args) => { runs.push([cmd, ...args]); return cmd === "/usr/bin/security" ? { code: 0, stdout: claudeSecret(), stderr: "" } : { code: 127, stdout: "", stderr: "" }; };
   return { io, runs };
 }
-test("a sweep reads Claude and Codex natively and asks quota-axi only for the others", async () => {
+test("a sweep reads every provider natively; only Claude's Keychain lookup runs a program", async () => {
   const { io, runs } = routedIo();
-  const result = await collect(io, runtime, now, null);
-  assert.equal(runs.length, 1);
-  assert.ok(!runs[0].includes("claude") && !runs[0].includes("codex") && runs[0].includes("copilot"));
+  const result = await collect(io, now, null);
+  assert.ok(runs.every(r => r[0] === "/usr/bin/security"));
   assert.equal(result.swept, true); assert.equal(result.read, null); assert.equal(result.failed, null);
-  assert.deepEqual(result.report.providers.slice(0, 2).map(p => [p.id, p.status, p.windows.length]), [["claude", "fresh", 3], ["codex", "fresh", 4]]);
+  assert.deepEqual(result.report.providers.map(p => [p.id, p.status, p.windows.length]), [["claude", "fresh", 3], ["codex", "fresh", 4]]);
   noSecrets(result);
-});
-test("a targeted read of native providers starts no subprocess besides the Keychain lookup", async () => {
-  const { io, runs } = routedIo();
-  const result = await collect(io, runtime, now, ["claude", "codex"]);
-  assert.equal(runs.length, 0);
-  assert.deepEqual(result.read, ["claude", "codex"]);
-  const noSetup = await collect(routedIo().io, {}, now, null);
-  assert.deepEqual(noSetup.report.providers.map(p => p.id), ["claude", "codex"]); // without quota-axi set up, native providers still read
+  const targeted = await collect(routedIo().io, now, ["codex"]);
+  assert.deepEqual(targeted.read, ["codex"]); assert.equal(targeted.swept, false);
 });
 test("one provider failing keeps the others' readings and marks only itself stale", async () => {
   const { io } = routedIo({ routes: { [CODEX_USAGE]: [200, codexBody] } }); // Claude offline
-  const result = await collect(io, runtime, now, ["claude", "codex"]);
+  const result = await collect(io, now, ["claude", "codex"]);
   assert.deepEqual(result.read, ["codex"]);
   assert.deepEqual(result.failed.ids, ["claude"]);
-  assert.match(result.failed.message, /^Claude quota could not be read/);
+  assert.match(result.failed.message, /^Claude: quota could not be read/);
   assert.equal(result.swept, false);
   const down = routedIo({ routes: {} }).io;
-  await assert.rejects(collect(down, runtime, now, ["claude", "codex"]), /could not be read/);
+  await assert.rejects(collect(down, now, ["claude", "codex"]), /could not be read/);
+});
+test("a malformed answer from one provider fails only that provider", async () => {
+  const twins = { id: "agy", label: "Antigravity", read: async () => ({ provider: "agy", accountKeys: ["default"], state: { status: "fresh" },
+    windows: [{ id: "gemini_5h", label: "a", kind: "session", percentUsed: 1 }, { id: "gemini_5h", label: "b", kind: "session", percentUsed: 2 }] }) };
+  const { io } = routedIo(); io.adapters = [claude, twins];
+  const result = await collect(io, now, null);
+  assert.deepEqual(result.read, ["claude"]); assert.deepEqual(result.failed.ids, ["agy"]);
+});
+test("a provider with nothing to read now is neither a failure nor a reason to drop its reading", async () => {
+  const closed = { id: "agy", label: "Antigravity", read: async () => { throw new ReadFailure("not-running"); } };
+  const { io } = routedIo(); io.adapters = [claude, closed];
+  const result = await collect(io, now, null);
+  assert.equal(result.failed, null);
+  assert.equal(result.swept, false); // a sweep that skipped one keeps that provider's earlier reading
+  assert.deepEqual(result.read, ["claude"]);
+});
+test("a failure's hint is only given when every failed provider shares it", async () => {
+  const needs = (id, label, reason) => ({ id, label, read: async () => { throw new ReadFailure(reason); } });
+  const ok = { id: "codex", label: "Codex", read: async () => codex.read(routedIo().io) };
+  const mixed = await collect({ ...routedIo().io, adapters: [needs("claude", "Claude", "keychain"), needs("agy", "Antigravity", "discovery"), ok] }, now, null);
+  assert.doesNotMatch(mixed.failed.message, /Keychain/);
+  const same = await collect({ ...routedIo().io, adapters: [needs("claude", "Claude", "keychain"), ok] }, now, null);
+  assert.match(same.failed.message, /^Claude: needs one Keychain approval/);
 });
 test("a native read through the strip stores no credential and keeps a failed provider's reading", async () => {
   const before = normalizeReport({ schemaVersion: 5, generatedAt: iso(now - 600000), providers: [
@@ -230,18 +241,15 @@ test("a background read never opens a Keychain prompt; a Refresh may, and the gr
 test("native reads that outlast the read's deadline are given up as failures", async () => {
   const { io } = routedIo({ hang: true });
   io.sleep = () => Promise.resolve(); // the deadline arrives at once
-  const result = await collect(io, {}, now, ["claude", "codex"], now + 3000).catch(e => e);
+  const result = await collect(io, now, ["claude", "codex"], now + 3000).catch(e => e);
   assert.match(String(result.message), /could not be read/);
 });
-test("providers only quota-axi reads keep their readings and ask for setup when it isn't set up", async () => {
-  const { io, runs } = routedIo();
-  const result = await collect(io, {}, now, ["claude", "cursor"]);
-  assert.equal(runs.length, 0);
-  assert.deepEqual(result.read, ["claude"]);
-  assert.deepEqual(result.failed.ids, ["cursor"]);
-  const sweep = await collect(routedIo().io, {}, now, null);
-  assert.equal(sweep.swept, false); // the readings quota-axi took earlier are not dropped
-  assert.ok(sweep.failed.ids.includes("copilot"));
+test("a denied Keychain read forgets that provider's grant", async () => {
+  const io = fakeIo({ routes: { [CLAUDE_USAGE]: [200, claudeBody] } });
+  io.keychain = { allowed: true, granted: false, denied: false };
+  io.exec = async () => ({ code: 51, stdout: "", stderr: "" });
+  assert.equal((await claude.read(io)).state.status, "auth_required");
+  assert.equal(io.keychain.denied, true); assert.equal(io.keychain.granted, false);
 });
 test("the strip backs off after a provider fails and remembers a Keychain grant", async () => {
   const fetcher = async url => url === CODEX_USAGE ? { status: 200, ok: true, json: async () => codexBody } : Promise.reject(new Error("offline"));
