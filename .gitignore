@@ -7,3 +7,4 @@ artifacts/
 gpui-kit.d.ts
 herdr.d.ts
 jsconfig.json
+.claude/worktrees/

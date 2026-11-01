@@ -30,6 +30,8 @@ SOFTWARE.
 
 ## quota-axi
 
-Runtime dependency: quota-axi 0.1.69, https://github.com/kunchenguid/quota-axi.
-Its npm distribution contains its own MIT license and transitive dependency
-notices. It is installed by setup, not vendored into this source tree.
+quota-axi 0.1.69, https://github.com/kunchenguid/quota-axi, MIT.
+The provider adapters in `mods/agent-quota/providers/` port its endpoints,
+credential locations, limit identities and pace rules. It is a development
+dependency only (the parity tests compare against its own code); it is not
+installed by setup and not vendored into this source tree.

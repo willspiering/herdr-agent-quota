@@ -118,13 +118,14 @@ test("missing data renders an actionable empty state without a percentage", asyn
   assert.equal(host.view.page, "configure");
 });
 test("unexpected exceptions are never stored verbatim", async () => {
-  const host = await createHost({ data, runner: async () => { throw new TypeError("token=SECRET"); } });
-  host.view.runtime = { node: "/node", runner: "/runner", collector: "/collector" };
+  const throws = [{ id: "codex", label: "Codex", read: async () => { throw new TypeError("token=SECRET"); } }];
+  const host = await createHost({ data, adapters: throws });
   host.view.tick(host.cx);
   await host.tasks.at(-1)(host.cx);
-  assert.match(host.state[`${PREFIX}.error`].message, /could not start/);
-  const broken = await createHost({ data, runner: async () => ({ code: 0, get stdout() { throw new TypeError("SECRET"); } }) });
-  broken.view.runtime = host.view.runtime;
+  assert.match(host.state[`${PREFIX}.error`].message, /^Codex: quota could not be read/);
+  assert.doesNotMatch(JSON.stringify(host.state[`${PREFIX}.error`]), /SECRET/);
+  const odd = [{ id: "codex", label: "Codex", read: async () => ({ get provider() { throw new TypeError("SECRET"); } }) }];
+  const broken = await createHost({ data, adapters: odd });
   broken.view.tick(broken.cx);
   await broken.tasks.at(-1)(broken.cx);
   assert.doesNotMatch(JSON.stringify(broken.state[`${PREFIX}.error`]), /SECRET/);
@@ -144,7 +145,7 @@ test("pane header suppresses local readings for a remote terminal", async () => 
 });
 test("pane headers schedule nothing: no timers, no tasks, no reads", async () => {
   const runs = [];
-  const host = await createHost({ mode: "header", data, runtime: { pane: "p1" }, runner: async (...c) => { runs.push(c); return { code: 0, stdout: "" }; } });
+  const host = await createHost({ mode: "header", data, runtime: { pane: "p1" }, adapters: [{ id: "codex", label: "Codex", read: async () => { runs.push("codex"); } }] });
   assert.equal(host.timers.length, 0); assert.equal(host.tasks.length, 0);
   host.tree(); assert.equal(runs.length, 0);
 });
@@ -154,12 +155,16 @@ test("the strip checks every 10 s and the dashboard only repaints its clock", as
   const dash = await createHost({ data });
   assert.deepEqual(dash.timers.filter(t => !t.once).map(t => t.ms), [60000]);
 });
-// A host whose collector records each read and answers with a fresh report.
+// A host whose providers record each collection (the ids it read) and answer fresh.
 async function reader(mode, live, extra = {}) {
   const runs = [];
-  const runner = async (cmd, args) => { runs.push(args); return { code: 0, stdout: JSON.stringify({ schemaVersion: 5, generatedAt: new Date().toISOString(), providers: [{ provider: "codex", state: { status: "fresh" }, windows: [] }] }) }; };
-  const host = await createHost({ mode, data, live, runner, runtimeFile: { node: "/node", collector: "/quota-axi", runner: "/runner" }, ...extra });
-  host.view.runtime = { node: "/node", collector: "/quota-axi", runner: "/runner" };
+  let current = null;
+  const adapters = ["claude", "codex", "copilot"].map(id => ({ id, label: id, read: async () => {
+    if (!current) { current = []; runs.push(current); Promise.resolve().then(() => { current = null; }); }
+    current.push(id);
+    return { provider: id, accountKeys: ["default"], state: { status: "fresh" }, windows: [] };
+  } }));
+  const host = await createHost({ mode, data, live, adapters, ...extra });
   return { host, runs, settle: async () => { while (host.tasks.length > (mode === "strip" ? 2 : 1)) await host.tasks.splice(-1)[0](host.cx); } };
 }
 test("an agent finishing its turn triggers a targeted read once the gap allows", async () => {
@@ -174,9 +179,7 @@ test("an agent finishing its turn triggers a targeted read once the gap allows",
   host.state[`${PREFIX}.control`] = { attempt: Date.now() - 61000, sweptAt: Date.now() };
   host.timers[0].fn(host.cx); await settle();
   assert.equal(runs.length, 1);
-  assert.deepEqual(runs[0].slice(0, 2), ["/runner", "/quota-axi"]);
-  assert.ok(Number(runs[0][2]) > Date.now());
-  assert.equal(runs[0][3], "codex");
+  assert.deepEqual(runs[0], ["codex"]); // only the provider with limits or a running agent
   assert.equal(host.state[`${PREFIX}.control`].reason, "turn");
   host.timers[0].fn(host.cx); await settle();
   assert.equal(runs.length, 1); // served once, not again
@@ -214,7 +217,7 @@ test("Refresh asks the strip, which reads every provider; no shared write to ask
   const { host, runs, settle } = await reader("strip", [], { nextCommand: async () => (sent ? new Promise(() => {}) : (sent = true, "refresh")) });
   host.state[`${PREFIX}.control`] = { attempt: Date.now() - 20000, sweptAt: Date.now() };
   host.tasks[1](host.cx); await new Promise(r => setImmediate(r)); await settle();
-  assert.equal(runs.length, 1); assert.ok(!runs[0].includes("--provider"));
+  assert.equal(runs.length, 1); assert.deepEqual(runs[0], ["claude", "codex", "copilot"]); // a Refresh reads every provider
   assert.equal(host.state[`${PREFIX}.control`].reason, "manual");
 });
 test("every endless loop yields to Herdr through cx, and nothing uses browser timers", async () => {

@@ -65,6 +65,13 @@ export function parseReport(stdout, now = Date.now()) {
     if (report) break;
   }
   if (!report) throw new QuotaError("Collector returned an unreadable quota report.");
+  return normalizeReport(report, now);
+}
+
+// The allowlist itself, for a report that is already an object: native provider reads build
+// one directly, and every field still passes through the same validation as a parsed report.
+export function normalizeReport(report, now = Date.now()) {
+  if (!report || typeof report !== "object" || !Array.isArray(report.providers)) throw new QuotaError("Collector returned an unreadable quota report.");
   if (![3, 4, 5].includes(report.schemaVersion)) throw new QuotaError("Unsupported quota schema. This version supports schemas 3–5.");
   const generated = stamp(report.generatedAt);
   const at = generated !== null && generated <= now + 60000 ? Math.min(generated, now) : now;
@@ -79,11 +86,13 @@ export function parseReport(stdout, now = Date.now()) {
     const key = JSON.stringify([id, account]);
     if (lanes.has(key)) throw new QuotaError("Collector returned duplicate account lanes.");
     lanes.add(key);
-    const untrusted = new Set(Array.isArray(p.untrustedWindowIds) ? p.untrustedWindowIds : []);
+    // quota-axi put these under `state` in readings older builds stored; native lanes at the top.
+    const flagged = Array.isArray(p.untrustedWindowIds) ? p.untrustedWindowIds : Array.isArray(p.state?.untrustedWindowIds) ? p.state.untrustedWindowIds : [];
+    const untrusted = new Set(flagged);
     const windowIds = new Set();
     if (Array.isArray(p.windows) && p.windows.length > 100) throw new QuotaError("Quota report has too many limits in an account. Previous readings were kept.");
     const windows = (Array.isArray(p.windows) ? p.windows : []).filter(Boolean).map(w => {
-      // Ids round-trip through the supervisor's projection and are parsed twice, so the bound must
+      // Stored readings are parsed again on every load, so the bound must
       // hold a fallback id whole (kind and label, 120 each, JSON-escaped): truncating it on the
       // second parse once collapsed long labels into "duplicate" limits. Same formula as fbb7f2b,
       // so saved per-limit choices keep their keys.
@@ -266,6 +275,14 @@ export function targets(data, discovered = [], live = []) {
   return ids.length ? [...new Set(ids)].sort() : null;
 }
 // A targeted read replaces only the providers it covers; a sweep replaces everything.
+// Readings and stale flags for providers no adapter reads any more (ones only quota-axi
+// supported), which nothing would ever refresh or clear. `readable`: the ids still read.
+export function forgetUnreadable(data, error, readable) {
+  const keep = p => readable.has(p.axi ?? p.id), before = failure(error);
+  const providers = before?.providers ? before.providers.filter(id => readable.has(id)) : null;
+  return { data: data ? { ...data, providers: data.providers.filter(keep) } : data,
+    error: !before ? null : providers === null || providers.length ? { ...before, providers } : null };
+}
 export function mergeReport(previous, next, swept) {
   if (swept || !previous) return next;
   const read = new Set(next.providers.map(p => p.id));

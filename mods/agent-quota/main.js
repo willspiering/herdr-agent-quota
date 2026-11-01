@@ -1,15 +1,17 @@
 import { View, div, svg, image, PathBuilder, Background } from "gpui-kit";
 import { Button, h_flex, v_flex } from "gpui-base";
 import {
-  exec, appHome, readTextFile, knownAgents, agents, spaces, panes,
+  exec, home, readTextFile, knownAgents, agents, spaces, panes,
   theme, settings, shared, setShared, props, openOverlay, closeOverlay, nextCommand, run, layout,
+  window as appWindow,
 } from "herdr";
 import {
   PREFIX, options, providerId, catalog, visibleWindows, shows, reading, windowState,
   elapsed, pace, resetLabel, shortLabel, redlines, ageLabel, remoteAgent, QuotaError,
-  CADENCE, schedule, needsSweep, resetDue, targets, mergeReport, failure, failureAfter,
+  CADENCE, schedule, needsSweep, resetDue, targets, mergeReport, failure, failureAfter, forgetUnreadable,
 } from "./core.js";
 import { collect, READ_MS } from "./collector.js";
+import { ADAPTERS } from "./providers/index.js";
 
 const key = suffix => `${PREFIX}.${suffix}`;
 /** @returns {any} Application-owned, normalized shared state. */
@@ -18,7 +20,7 @@ const get = suffix => shared(key(suffix));
 const put = (suffix, value) => {
   if (JSON.stringify(get(suffix) ?? null) !== JSON.stringify(value ?? null)) setShared(key(suffix), value);
 };
-const GENERIC_ERROR = "Quota collection failed. Run quota-axi in a terminal to check it.";
+const GENERIC_ERROR = "Quota collection failed. Earlier readings were kept; retries back off.";
 const STATE_LABEL = { working: "Working", blocked: "Needs you", done: "Finished", idle: "Idle" };
 const PACE_NOTE = {
   "Ahead of pace": "Using faster than time is passing; at this rate it runs out before the reset",
@@ -29,9 +31,9 @@ const STATE_MARK = { working: "●", blocked: "▲", done: "✓", idle: "○" };
 const ICONS = { claude: "claude", codex: "codex", grok: "grok", cursor: "cursor", copilot: "copilot", kimi: "kimi" };
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 // Coordination is shared across copies/builds, not a module variable whose lifetime depends
-// on Herdr's module cache. A read can't outlive claim + READ_MS: its supervisor stops at that
-// deadline (or 24 s after its own launch, if sooner), and Herdr's exec cap is 30 s. The claim
-// lasts 5 s longer, so a cancelled copy's claim recovers without overlapping a live read.
+// on Herdr's module cache. A read can't outlive claim + READ_MS: every provider read races that
+// deadline. The claim lasts 5 s longer, so a cancelled copy's claim recovers without overlapping
+// a live read.
 const CLAIM_MS = READ_MS + 5000;
 // How long a dashboard waits for the strip to claim a read it asked for before reading itself.
 const DELEGATE_MS = 4000;
@@ -94,7 +96,6 @@ export default class AgentQuota extends View {
     this.width = this.docked ? 460 : this.mode === "dashboard" ? 850 : 600;
     // One view-owned handle, created here: the strip takes Enter/Space, the dashboard Escape.
     this.keys = cx.focus_handle();
-    this.runtime = {};
     this.pending = false;
     this.queued = false;
     this.statuses = null;
@@ -103,8 +104,7 @@ export default class AgentQuota extends View {
     // Pane headers, one per pane, only display. The strip schedules and runs reads; an opened
     // dashboard asks it for one. The 10 s check is in-memory: it reads only when one is due.
     if (this.mode !== "header") cx.spawn(async cx => {
-      try { this.runtime = JSON.parse(await readTextFile(`${appHome()}/mods/agent-quota/.runtime.json`) || "{}"); } catch { /* collection reports setup instructions */ }
-      cx.phase(); // End retired tasks before they start a subprocess or publish state.
+      cx.phase(); // End retired tasks before they read or publish state.
       if (this.mode === "strip") this.tick(cx);
     });
     // The window reads when it opens; the panel's opener asks the strip instead (see open()).
@@ -199,7 +199,7 @@ export default class AgentQuota extends View {
     run(`agent-quota.${why}`);
     cx.timer.after(DELEGATE_MS, cx => {
       const c = get("control");
-      if ((c?.attempt ?? 0) >= asked || c?.busyUntil > Date.now() || !this.runtime.runner) return;
+      if ((c?.attempt ?? 0) >= asked || c?.busyUntil > Date.now()) return;
       this.tick(cx, options);
     });
   }
@@ -244,11 +244,27 @@ export default class AgentQuota extends View {
       if (get("control")?.token !== token || Date.now() - now >= CLAIM_MS) { this.pending = false; return; }
       const next = { attempt: now, failures: 0, sweptAt: control?.sweptAt ?? 0, discoveredAt: control?.discoveredAt ?? 0, reason };
       let result, error = null;
+      // A background read never raises a Keychain prompt: each provider reads its own Keychain item
+      // only once that item has been read successfully before, and a Refresh, which the user asked
+      // for, may prompt. Only the fact of each grant is kept. Migrating once from older builds
+      // (no `keychains` yet): `keychain: true` meant Claude's, and quota-axi read Claude on macOS
+      // only through its Keychain item, so a Claude reading also counts.
+      const legacy = !Array.isArray(control?.keychains) && (control?.keychain === true || (data?.providers ?? []).some(p => p.id === "claude" && p.windows.length > 0));
+      const before = new Set([...(Array.isArray(control?.keychains) ? control.keychains : []), ...(legacy ? ["claude"] : [])]);
+      const grants = {};
+      const keychain = id => (grants[id] ??= { allowed: before.has(id) || reason === "manual", granted: false, denied: false });
+      // Native reads use Herdr's fetch and file reads; each request races this task's own timer.
+      const io = { exec, fetch: (url, init) => fetch(url, init), readTextFile, home, platform: appWindow().platform, adapters: ADAPTERS, keychain,
+        sleep: ms => new Promise(resolve => { cx.timer.after(ms, () => resolve()); }) };
       try {
-        result = await collect(exec, this.runtime, Date.now(), ids, now + READ_MS);
-        if (result.swept) next.sweptAt = now;
+        result = await collect(io, Date.now(), ids, now + READ_MS);
+        // A sweep that ran is a sweep, even if one provider failed in it: that provider retries.
+        if (ids === null) next.sweptAt = now;
+        // A provider failing backs the schedule off, as a failed read always did; one waiting for a
+        // Keychain approval doesn't, since only the user can give it.
+        if (result.failed?.backoff) next.failures = (control?.failures ?? 0) + 1;
       } catch (e) {
-        // Only this mod's own messages are kept; anything else could echo subprocess output.
+        // Only this mod's own messages are kept; anything else could echo a vendor's answer.
         error = e instanceof QuotaError ? e.message.slice(0, 160) : GENERIC_ERROR;
         next.failures = (control?.failures ?? 0) + 1;
       }
@@ -256,11 +272,20 @@ export default class AgentQuota extends View {
       // A late answer from an expired/replaced claim must not clobber newer readings.
       if (get("control")?.token !== token) { this.pending = false; return; }
       const known = (get("data")?.providers ?? []).map(p => p.axi).filter(Boolean);
-      if (result) put("data", mergeReport(get("data"), result.report, result.swept));
-      put("error", failureAfter(get("error"), { message: error, ids: sweep ? null : ids, known }));
+      // A sweep also drops what no provider can read any more (see forgetUnreadable).
+      const swept = ids === null ? forgetUnreadable(get("data"), get("error"), new Set(ADAPTERS.map(a => a.id))) : { data: get("data"), error: get("error") };
+      if (result) put("data", mergeReport(swept.data, result.report, result.swept));
+      // What this read replaced is no longer stale; providers it couldn't read keep their earlier
+      // readings and become stale. A read that failed outright leaves everything it covered stale.
+      const after = result ? failureAfter(swept.error, { ids: result.cleared, known }) : failureAfter(swept.error, { message: error, ids: sweep ? null : ids, known });
+      put("error", result?.failed ? failureAfter(after, { message: result.failed.message, ids: result.failed.ids, known }) : after);
       // Discovery isn't on the collection critical path and never holds its claim open.
       const discover = now - next.discoveredAt >= CADENCE.discover || (reason === "manual" && now - next.discoveredAt >= CADENCE.gap);
       if (discover) next.discoveredAt = now; // rate-limit failures too
+      // A failed Keychain read forgets a grant only on a Refresh, with the user there to see the
+      // prompt; in the background it may just be a locked Keychain after sleep.
+      next.keychains = [...new Set([...before, ...Object.entries(grants).filter(([, g]) => g.granted).map(([id]) => id)])]
+        .filter(id => !(reason === "manual" && grants[id]?.denied)).sort();
       put("control", next);
       this.pending = false;
       cx.notify();
@@ -659,7 +684,7 @@ export default class AgentQuota extends View {
       .child(this.section("── about this data", t))
       .child(v_flex().px(10).gap(4)
         .child(label("Reads after an agent finishes a turn (at most once a minute), every 3 minutes while agents work, and every 10 minutes otherwise. Never makes inference requests.", 11, t.muted))
-        .child(label("Reads local CLI sign-ins through quota-axi. Stores only percentages, reset times and your choices here.", 11, t.muted))
+        .child(label("Reads each agent's existing sign-in and asks only its own usage service, directly. Never refreshes a sign-in. Stores only percentages, reset times and your choices here.", 11, t.muted))
         .child(label("Token counts are unavailable unless a provider reports them.", 11, t.muted)));
   }
 

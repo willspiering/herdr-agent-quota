@@ -99,7 +99,7 @@ test("panel: without a panel in the layout the strip still opens the window", as
 // ── the panel copy ──
 
 test("panel: the panel copy starts no read, no overlay and no command of its own", async () => {
-  const host = await createHost({ mode: "panel", data, runtimeFile: { node: "/n", runner: "/r", collector: "/c" } });
+  const host = await createHost({ mode: "panel", data });
   await host.tasks[0]?.(host.cx);
   assert.equal(host.commands.length, 0);
   assert.equal(host.overlays.length, 0);

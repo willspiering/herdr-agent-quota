@@ -95,7 +95,7 @@ export function cappedExec(runner, { cap = EXEC_CAP_MS, onStop = () => {} } = {}
   });
 }
 
-export async function createHost({ nextCommand = () => new Promise(() => {}), mode = "dashboard", data = null, live = [], installed = [], paneList = [], spaceList = [], runtime = {}, runtimeFile = null, runner, sharedState, clock, source: inputSource, coreModule = core, collectorModule = collector, execCap = EXEC_CAP_MS, layoutTree = null } = {}) {
+export async function createHost({ nextCommand = () => new Promise(() => {}), mode = "dashboard", data = null, live = [], installed = [], paneList = [], spaceList = [], runtime = {}, runner, sharedState, clock, source: inputSource, coreModule = core, collectorModule = collector, execCap = EXEC_CAP_MS, layoutTree = null, adapters = [], files = {}, fetcher = async () => { throw Error("No network in tests"); } } = {}) {
   const source = inputSource ?? await readFile(new URL("../mods/agent-quota/main.js", import.meta.url), "utf8");
   const state = sharedState ?? { [`${core.PREFIX}.data`]: copy(data), [`${core.PREFIX}.discovered`]: copy(installed) };
   const properties = { mode, ...runtime };
@@ -115,7 +115,7 @@ export async function createHost({ nextCommand = () => new Promise(() => {}), mo
   };
   const api = {
     exec: cappedExec(runner ?? (async () => { throw Error("Not installed"); }), { cap: execCap }),
-    appHome: () => "/preview", readTextFile: async () => runtimeFile && JSON.stringify(runtimeFile),
+    appHome: () => "/preview", readTextFile: async path => files[path] ?? null,
     knownAgents: async () => installed, agents: () => (reads.agents++, live), spaces: () => (reads.spaces++, spaceList), panes: () => paneList,
     theme: () => palette, settings: () => ({ dark: true, font_family: "JetBrains Mono" }),
     shared: name => { sharedReads.push(name); return copy(state[name]); },
@@ -126,7 +126,8 @@ export async function createHost({ nextCommand = () => new Promise(() => {}), mo
     // The shown layout with its clicks applied (a toggled node's `hidden`), or null.
     layout: () => copy(layoutTree),
   };
-  const deps = { ...constructors, ...api, ...coreModule, ...collectorModule, Date: clock ? class extends Date { static now() { return clock.now; } } : Date };
+  // Native providers are off unless a test supplies its own, and nothing reaches the network.
+  const deps = { ...constructors, ...api, ...coreModule, ...collectorModule, ADAPTERS: adapters, fetch: fetcher, home: () => "/home/tester", appWindow: () => ({ platform: "macos" }), Date: clock ? class extends Date { static now() { return clock.now; } } : Date };
   const code = source.replace(/import[\s\S]*?from\s+"[^";]+";/g, "").replace("export function colors", "function colors").replace("export default class AgentQuota", "class AgentQuota");
   const AgentQuota = new Function(...Object.keys(deps), `${code}\nreturn AgentQuota;`)(...Object.values(deps));
   const view = new AgentQuota(); view.init(properties, cx);
