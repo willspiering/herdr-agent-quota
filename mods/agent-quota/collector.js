@@ -23,7 +23,8 @@ function failureMessage(error, labels) {
 }
 
 // Read quota: native providers through Herdr's fetch, the rest through quota-axi, side by side.
-// `io`: { exec, fetch, readTextFile, home, platform, sleep, adapters? }.
+// `io`: { exec, fetch, readTextFile, home, platform, sleep, adapters?, keychain?(id) }: each
+// provider gets its own Keychain consent ({ allowed, granted }), never another provider's.
 // Returns { report, swept, read, failed }: `read` lists the provider ids this read replaced
 // (null: everything, a complete sweep); `failed` is { message, ids } for providers that kept
 // their earlier readings. Throws only when nothing could be read at all.
@@ -40,7 +41,7 @@ export async function collect(io, runtime = {}, now = Date.now(), providers = nu
   // fetch can't be cancelled, so a late one is ignored and counts as a failure.
   const budget = Math.max(1000, deadline - Date.now() - 2000);
   const late = () => io.sleep(budget).then(() => { throw new ReadFailure("timeout"); });
-  const reads = own.map(a => Promise.race([a.read({ ...io, now }), late()]).then(lane => ({ id: a.id, lane, error: null }), error => ({ id: a.id, lane: null, error })));
+  const reads = own.map(a => Promise.race([a.read({ ...io, now, keychain: typeof io.keychain === "function" ? io.keychain(a.id) : io.keychain }), late()]).then(lane => ({ id: a.id, lane, error: null }), error => ({ id: a.id, lane: null, error })));
   const axiRead = useAxi ? collectAxi(io.exec, runtime, now, native.size ? axi : ids, deadline).then(r => ({ report: r.report, error: null }), error => ({ report: null, error })) : null;
   const [lanes, other] = await Promise.all([Promise.all(reads), axiRead]);
 

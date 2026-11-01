@@ -246,11 +246,14 @@ export default class AgentQuota extends View {
       if (get("control")?.token !== token || Date.now() - now >= CLAIM_MS) { this.pending = false; return; }
       const next = { attempt: now, failures: 0, sweptAt: control?.sweptAt ?? 0, discoveredAt: control?.discoveredAt ?? 0, reason };
       let result, error = null;
-      // A background read never raises a Keychain prompt: it reads Claude's Keychain item only once
-      // access is known to work (granted before, or a reading quota-axi already took), and a
-      // Refresh, which the user asked for, may prompt. Only the fact of the grant is kept.
-      const granted = control?.keychain === true || (data?.providers ?? []).some(p => p.id === "claude" && p.windows.length > 0);
-      const keychain = { allowed: granted || reason === "manual", granted };
+      // A background read never raises a Keychain prompt: each provider reads its own Keychain item
+      // only once access to that item is known to work (granted before, or a reading quota-axi
+      // already took), and a Refresh, which the user asked for, may prompt. Only the fact of each
+      // grant is kept. Builds before this one recorded Claude's as `keychain: true`.
+      const proven = new Set([...(control?.keychains ?? []), ...(control?.keychain === true ? ["claude"] : []),
+        ...(data?.providers ?? []).filter(p => p.windows.length > 0).map(p => p.axi ?? p.id)]);
+      const grants = {};
+      const keychain = id => (grants[id] ??= { allowed: proven.has(id) || reason === "manual", granted: proven.has(id) });
       // Native reads use Herdr's fetch and file reads; each request races this task's own timer.
       const io = { exec, fetch: (url, init) => fetch(url, init), readTextFile, home, platform: appWindow().platform, adapters: ADAPTERS, keychain,
         sleep: ms => new Promise(resolve => { cx.timer.after(ms, () => resolve()); }) };
@@ -277,7 +280,9 @@ export default class AgentQuota extends View {
       // Discovery isn't on the collection critical path and never holds its claim open.
       const discover = now - next.discoveredAt >= CADENCE.discover || (reason === "manual" && now - next.discoveredAt >= CADENCE.gap);
       if (discover) next.discoveredAt = now; // rate-limit failures too
-      if (keychain.granted) next.keychain = true;
+      const kept = [...new Set([...(control?.keychains ?? []), ...(control?.keychain === true ? ["claude"] : []),
+        ...Object.entries(grants).filter(([, g]) => g.granted).map(([id]) => id)])].sort();
+      if (kept.length) next.keychains = kept;
       put("control", next);
       this.pending = false;
       cx.notify();

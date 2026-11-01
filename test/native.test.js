@@ -253,6 +253,6 @@ test("the strip backs off after a provider fails and remembers a Keychain grant"
   await host.tasks.splice(-1)[0](host.cx);
   const control = host.state[`${PREFIX}.control`];
   assert.equal(control.failures, 1); // Claude failed: back off, as a failed read does
-  assert.equal(control.keychain, true); // the manual read read the Keychain: no prompt next time
+  assert.deepEqual(control.keychains, ["claude"]); // the manual read read Claude's item: no prompt next time, for it alone
   assert.ok(control.sweptAt > 0);
 });
