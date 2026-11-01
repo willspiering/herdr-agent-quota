@@ -30,7 +30,7 @@ const percent = v => number(v) === null || v < 0 ? null : Math.min(100, v);
 export const stamp = v => typeof v === "string" && Number.isFinite(Date.parse(v)) ? Date.parse(v) : null;
 export function providerId(value) {
   const id = text(value).toLowerCase();
-  return ({ "claude-code": "claude", "claude code": "claude", "openai-codex": "codex", "cursor-agent": "cursor", "github-copilot": "copilot", "grok-code": "grok", opencode: "opencode-go" })[id] ?? id;
+  return ({ "claude-code": "claude", "claude code": "claude", "openai-codex": "codex", "cursor-agent": "cursor", "github-copilot": "copilot", "grok-code": "grok", opencode: "opencode-go", antigravity: "agy" })[id] ?? id;
 }
 export function options(start = {}, saved = {}) {
   const o = { ...DEFAULTS, ...start, ...saved };
@@ -86,7 +86,9 @@ export function normalizeReport(report, now = Date.now()) {
     const key = JSON.stringify([id, account]);
     if (lanes.has(key)) throw new QuotaError("Collector returned duplicate account lanes.");
     lanes.add(key);
-    const untrusted = new Set(Array.isArray(p.untrustedWindowIds) ? p.untrustedWindowIds : []);
+    // quota-axi reports these under `state`; native lanes and the supervisor's projection at the top.
+    const flagged = Array.isArray(p.untrustedWindowIds) ? p.untrustedWindowIds : Array.isArray(p.state?.untrustedWindowIds) ? p.state.untrustedWindowIds : [];
+    const untrusted = new Set(flagged);
     const windowIds = new Set();
     if (Array.isArray(p.windows) && p.windows.length > 100) throw new QuotaError("Quota report has too many limits in an account. Previous readings were kept.");
     const windows = (Array.isArray(p.windows) ? p.windows : []).filter(Boolean).map(w => {

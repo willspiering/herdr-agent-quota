@@ -233,3 +233,9 @@ test("collector and parser failures are typed as this mod's own messages", async
   assert.throws(() => parseReport("nope", now), QuotaError);
   await assert.rejects(collectAxi(async () => ({ code: 2, stdout: "" }), {}, now), QuotaError);
 });
+test("untrusted limit ids are honored where quota-axi puts them, under state", () => {
+  const raw = { schemaVersion: 5, generatedAt: new Date().toISOString(), providers: [{ provider: "kimi", state: { status: "fresh", untrustedWindowIds: ["usage"] },
+    windows: [{ id: "usage", label: "usage", kind: "unknown", percentUsed: 40 }] }] };
+  const w = parseReport(JSON.stringify(raw)).providers[0].windows[0];
+  assert.equal(w.trusted, false); assert.equal(w.percentUsed, null);
+});
