@@ -243,3 +243,22 @@ with gauges, sessions and the ✕ button; hiding it gives the terminal its width
 Checked by hand afterwards and reported working: `cmd-shift-u`, Escape and ✕ in
 the column, resizing it by drag, the meter-row layout, and the light theme and zoom
 at column width.
+
+## Herdr 0.1.11, 2026-10-31
+
+Herdr updated to 0.1.11 (herdr-core 0.9.3) after the column measurements above,
+which were taken on 0.1.10. Checked on the updated, relaunched app:
+
+- The installed mod still matches the repository, the hidden `agent-quota-panel`
+  column is still in the `agent-quota` layout, and `cmd-shift-u` is still bound.
+  `herdr-app status` reports no errors.
+- Against the 0.1.11 declarations (changed only in one doc comment):
+  typecheck 0 errors, `npm test` 114 passing, `npm run check` passes.
+- Idle CPU, 25 s with the column hidden: about 13%, the same as on 0.1.10 (13.3%).
+
+0.1.11 fixes "The window no longer freezes or spikes the CPU for seconds at a time
+while mods run". That is the likeliest cause of the 100% CPU episode seen after
+repeated reloads, though that episode was never attributed. 0.1.11 does not change
+how window overlays live: the guide still says opening a keyed window again replaces
+it, so each open builds a new mod copy, while the column builds its copy once. The
+column stays. The window benchmark was not repeated on 0.1.11.
