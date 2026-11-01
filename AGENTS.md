@@ -6,7 +6,10 @@ Read `PRODUCT.md`, `DESIGN.md` and the installed Herdr
 - `mods/agent-quota/main.js` is native GPUI UI; no DOM, Node APIs, or webview.
 - `core.js` is the pure schema/freshness/identity boundary. Keep stable account
   and limit identities; missing usage is never zero.
-- `collector.js` runs quota-axi without inference or optional credential refresh.
+- `collector.js` reads every provider natively (`providers/`, Herdr's `fetch`),
+  without inference or credential refresh. Tokens never leave the read that
+  uses them; only the vendor's own host receives them. No Keychain prompt from
+  a background read.
   Never persist raw reports, subprocess diagnostics, credentials or account PII.
 - Use Herdr reactive agent data. Do not scrape terminals or conversation logs.
 - Preserve shipped Herdr files; install into a cloned layout.

@@ -56,30 +56,28 @@ One mod, `mods/agent-quota`, with `place: none`. The same View renders strip,
 dashboard or optional header using `props().mode`. Use Herdr's `knownAgents`,
 `agents`, `spaces` and `panes`; never scrape terminals. `core.js` handles
 quota schema 3–5, account lanes, visibility, activity ranking and freshness.
-`collector.js` reads Claude and Codex natively (`providers/`, Herdr's `fetch`)
-and the remaining providers through quota-axi. Only the strip schedules reads: an in-memory
+`collector.js` reads every provider natively: one adapter per provider in
+`providers/`, using Herdr's `fetch`, `readTextFile` and (only where a sign-in
+lives in the Keychain, a SQLite database or a running app) `exec`. Only the strip schedules reads: an in-memory
 check every 10 s compares agent statuses and reads only when
 `schedule()` in `core.js` says one is due. Triggers: an agent finishing a turn
 (working → anything else), a limit reset passing, the dashboard opening on
 data over 60 s old, Refresh, a 3-minute backstop while any agent works and a
 10-minute one otherwise. Reads are at least 60 s apart; failures back off from
-60 s to 10 minutes. Routine reads pass `--provider` for providers with limits
-or local agents (0.07 s versus 0.6 s for all 19); every provider is swept
-hourly, on Refresh and after a failure. Pane headers only display. Paint meters
+60 s to 10 minutes. Routine reads ask only providers with limits
+or local agents; every provider is swept hourly, on Refresh and after a failure. Pane headers only display. Paint meters
 with `window.paint_path`: each run of same-colored cells is one
 `PathBuilder.stroke(h)` line (or `arc_to`) with `dash_array([cell, gap])`. Use native motion (`frames`, `transition`); no animation polling.
 
-Collection always runs through `scripts/collect.mjs`. Herdr's `exec` stops any
-program at 30 s, so the supervisor must always finish first. It gives quota-axi
-at most 24 s from the supervisor's own start (and never past claim + 30 s), caps
-stdout at 1 MiB, and kills the collector's process group when it finishes, times
-out, or receives SIGTERM, SIGHUP or SIGINT. Each group is recorded in
-`.runtime/groups/`, so a group left by an untrappable SIGKILL is reaped by the
-next read. The supervisor returns as soon as quota-axi exits, after a 150 ms
-drain, even if a helper keeps stdout open. Raw audit JSON is reduced outside
-Herdr. Setup records the absolute Node, supervisor and quota-axi paths in the
-hidden `.runtime.json`. A 35-second shared claim prevents competing
-copies/builds from reading concurrently; retired and late results are discarded.
+Providers are read side by side. Each adapter's answer passes through
+`core.normalizeReport` on its own, so one malformed answer fails only that
+provider. Every read races the read's own 25 s timer (Herdr's `fetch` can't be
+cancelled, so a late answer is ignored). A provider that fails keeps its earlier
+reading, marked stale, and backs the schedule off; a provider with nothing to
+read now (Antigravity closed, a sign-in without credits) keeps its earlier
+reading without counting as a failure. A sweep drops readings for providers no
+adapter can read. A 30-second shared claim prevents competing copies/builds from
+reading concurrently; retired and late results are discarded.
 The dashboard's spinner follows that shared claim. A Refresh inside the 10 s
 cooldown is queued, labelled "Queued" and run when the cooldown ends. A failed
 read marks only the providers it covered as stale. Discovery runs separately, hourly or on manual refresh (at most once
@@ -96,9 +94,10 @@ only its clone, preserves the existing status mod and refuses unfamiliar
 headers or name collisions. Runtime paths are generated separately, never
 hardcoded to a particular user's home. Saving any file in a mod folder reloads
 every copy, except hidden files, `.d.ts` files, `jsconfig.json` and `node_modules`.
-So setup writes its generated files hidden (`.runtime.json`, `.installation.json`).
-It then stages changed build files beside the mods folder and renames them in
-together, with no await between renames.
+So setup writes its generated file hidden (`.installation.json`) and removes the
+`.runtime.json` older builds wrote. It then stages changed build files, subfolders
+included, beside the mods folder and renames them in together, with no await
+between renames.
 
 ## Watch out
 
@@ -125,16 +124,18 @@ Unknown percentages stay unknown. A past reset suppresses the old value;
 stale values are historical and never count toward redline alerts. Used-share
 windows are not independent quota pools. Provider durations and limits vary.
 
-Herdr's `exec` is capped at 30 s and 8 MiB. When it hits the cap it stops the
-program it started, not that program's detached children, so every subprocess
-budget must end well before 30 s. Herdr rejects for both a program that can't
-start and a program it stopped, so tell the two apart before showing a message.
-quota-axi's own detached helpers (claude-swap, delegated refresh) only run when
-credential refresh is on; keep `--no-credential-refresh`.
+Herdr's `exec` is capped at 30 s and 8 MiB and runs no shell. Adapters call
+only fixed absolute programs (`/usr/bin/security`, `/usr/bin/sqlite3` with
+`-init /dev/null`, `/bin/ps`, `lsof`) with constant arguments, each under its own
+short timer. Herdr's runtime has no `process.env`, `Buffer`, global `URL` or
+Node modules: adapters read default sign-in paths, decode base64 themselves and
+check hosts with `hostOf`.
 
-Natively, Herdr's `exec` runs a program in Herdr's own process group and, at
-30 s, SIGKILLs that one pid. Its children survive, so never rely on Herdr to
-clean up a subprocess tree, and never signal the supervisor's own group.
+Herdr's `fetch` follows redirects and exposes no response headers. An answer
+from a host other than the one asked is discarded. gRPC-web (Grok) is asked for
+in its text form, and a "trailers-only" refusal (empty body, status in headers)
+is settled by a models check. Never refresh a token or call a token-exchange
+endpoint: some vendors rotate refresh tokens on use and would sign the user out.
 
 `child()` rejects `null` and `undefined` ("child(value) expects an element…").
 Optional parts go through `.when(...)` or `.children([...])`. `herdr-app check`
@@ -169,22 +170,24 @@ session of repeated hot reloads, layout round-trips and dozens of dashboard
 reopens. Install once, relaunch the window gracefully, and measure only on a
 fresh window.
 
-Limit ids are parsed twice: once in the supervisor and again in Herdr. Keep the
-id bound large enough that a fallback id (kind and label) survives the second
-parse whole.
+Stored readings are parsed again on every load. Keep the id bound large enough
+that a fallback id (kind and label) survives a second parse whole, and keep
+limit ids and account keys identical to quota-axi's, or saved per-limit choices
+are lost.
 
-The Dock can have a different PATH. Use the setup-generated absolute paths;
-if unavailable, show setup instructions. Unbounded PATH/login-shell fallbacks
-defeat the supervisor and must not return. Do not display subprocess stderr or persist raw reports. Collector
-auth setup may need a one-time secure-store grant; do not trigger that from
-background polling. No inference requests. CLI execution and quota availability
-are different capabilities.
+Keychain consent is per provider. A background read only reads an item that
+was read successfully before; a Refresh may prompt; a denial forgets the grant.
+Without consent, check only that the item exists (no `-w`), which never prompts.
+Do not display subprocess stderr, vendor error text or raw responses: failure
+reasons are fixed strings. Vendor-supplied names pass through `name()` before
+they reach shared state. No inference requests.
 
 ## Done when
 
 - `npm test` passes.
 - `herdr-app check mods/agent-quota` passes on a normal desktop session.
-- Installed percentages match local quota-axi readings.
+- Installed percentages match quota-axi's readings of the same sign-ins
+  (`node node_modules/quota-axi/dist/bin/quota-axi.js --json --full --no-credential-refresh`).
 - The native dashboard renders correctly in both themes and at increased zoom.
 - The column toggles from the strip and `cmd-shift-u`, shows on a header's
   provider and on Settings, hides with `✕`/Escape, and closing starts no read.

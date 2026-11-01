@@ -271,11 +271,17 @@ export default class AgentQuota extends View {
       // A late answer from an expired/replaced claim must not clobber newer readings.
       if (get("control")?.token !== token) { this.pending = false; return; }
       const known = (get("data")?.providers ?? []).map(p => p.axi).filter(Boolean);
-      if (result) put("data", mergeReport(get("data"), result.report, result.swept));
+      // A sweep also drops what no provider can read any more: readings quota-axi took for
+      // providers Herdr has no agent for, which nothing would ever refresh or clear.
+      const readable = new Set(ADAPTERS.map(a => a.id)), current = (p) => readable.has(p.axi ?? p.id);
+      const prior = get("data");
+      if (result) put("data", mergeReport(ids === null && prior ? { ...prior, providers: prior.providers.filter(current) } : prior, result.report, result.swept));
       // What this read replaced is no longer stale; providers it couldn't read keep their earlier
       // readings and become stale. A read that failed outright leaves everything it covered stale.
       const after = result ? failureAfter(get("error"), { ids: result.read, known }) : failureAfter(get("error"), { message: error, ids: sweep ? null : ids, known });
-      put("error", result?.failed ? failureAfter(after, { message: result.failed.message, ids: result.failed.ids, known }) : after);
+      const stale = result?.failed ? failureAfter(after, { message: result.failed.message, ids: result.failed.ids, known }) : after;
+      const left = stale?.providers && ids === null ? stale.providers.filter(id => readable.has(id)) : stale?.providers;
+      put("error", stale && (left === null || left?.length) ? { ...stale, providers: left } : null);
       // Discovery isn't on the collection critical path and never holds its claim open.
       const discover = now - next.discoveredAt >= CADENCE.discover || (reason === "manual" && now - next.discoveredAt >= CADENCE.gap);
       if (discover) next.discoveredAt = now; // rate-limit failures too

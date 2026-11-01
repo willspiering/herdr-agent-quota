@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Quota is read natively with Herdr's `fetch`: no Node, no npm packages and no
+  background process at runtime. Each read used to start two Node processes
+  (a supervisor and quota-axi) peaking around 120 MB; now a read runs in Herdr
+  itself, plus a small system program only where a sign-in needs one
+  (`security`, `sqlite3`, `ps`/`lsof`). Providers: Claude, Codex, GitHub
+  Copilot, Cursor, Grok, Kimi, OpenCode Go and Antigravity, with the same limit
+  ids, account keys and pace as quota-axi 0.1.69, so saved choices carry over.
+  Providers Herdr has no agent for (zai, deepseek, openrouter and others) are no
+  longer read.
+- One provider failing no longer fails the whole read: it keeps its earlier
+  reading, marked stale, and the others update.
+- Background reads never raise a Keychain prompt; Refresh may, once per
+  provider, and only the fact of the grant is remembered.
+- Setup installs no dependencies and removes the old `.runtime.json`. Run setup
+  again after upgrading.
+
 - The dashboard opens as a column beside the terminals instead of a floating
   window: a hidden layout block Herdr shows and hides, so opening and closing it
   allocates nothing (the window retained about 0.25 MB per open). Toggle it with

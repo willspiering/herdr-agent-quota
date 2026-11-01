@@ -8,8 +8,9 @@ Native desktop Herdr mod, using GPUI JavaScript. No webview.
 
 ## Stack
 
-Herdr's shipped gpui-kit and herdr APIs; quota-axi supplies provider data.
-Node 22.19+ runs tooling and the collector. No UI framework dependencies.
+Herdr's shipped gpui-kit and herdr APIs; provider usage is read natively with
+Herdr's `fetch`. Node 22.19+ runs only setup and development tooling. No runtime
+dependencies.
 
 ## Users
 
@@ -47,7 +48,8 @@ workflow and configuration, with terminal-styled meters and optional gauges.
 ## Evidence on Hand
 
 Reference: https://github.com/Lakris2407/herdr-quota at commit 832e026.
-Backend: https://github.com/kunchenguid/quota-axi v0.1.69, schema 5.
+Provider endpoints and identities: ported from https://github.com/kunchenguid/quota-axi
+v0.1.69 (schema 5), kept as a dev dependency for parity tests.
 Herdr's installed AGENTS.md and type declarations are implementation authority.
 
 ## Product Principles

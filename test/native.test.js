@@ -264,3 +264,15 @@ test("the strip backs off after a provider fails and remembers a Keychain grant"
   assert.deepEqual(control.keychains, ["claude"]); // the manual read read Claude's item: no prompt next time, for it alone
   assert.ok(control.sweptAt > 0);
 });
+test("a sweep drops readings and stale flags for providers no adapter can read any more", async () => {
+  const before = normalizeReport({ schemaVersion: 5, generatedAt: iso(now - 600000), providers: [
+    { provider: "zai", accountKeys: ["default"], state: { status: "auth_required" }, windows: [] },
+    { provider: "codex", accountKeys: ["codex-home"], state: { status: "fresh" }, windows: [{ id: "weekly", label: "week", kind: "weekly", percentUsed: 5 }] }] }, now);
+  const fetcher = async url => url === CODEX_USAGE ? { status: 200, ok: true, json: async () => codexBody } : Promise.reject(new Error("offline"));
+  const host = await createHost({ mode: "strip", data: before, adapters: [codex], fetcher, files: { "/home/tester/.codex/auth.json": codexAuth() } });
+  host.state[`${PREFIX}.error`] = { message: "old", providers: ["zai"] };
+  host.view.tick(host.cx, { force: true });
+  await host.tasks.splice(-1)[0](host.cx);
+  assert.deepEqual(host.state[`${PREFIX}.data`].providers.map(p => p.id), ["codex"]);
+  assert.equal(host.state[`${PREFIX}.error`], null);
+});
