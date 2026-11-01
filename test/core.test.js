@@ -81,7 +81,7 @@ test("running and focused agents rise ahead of favorite order", () => {
 test("unknown installed agents stay visible, remote activity is not local quota", () => {
   const list = catalog(null, [{ key: "opencode", installed: true, name: "OpenCode" }], [{ address: "server/t1", space: "server/s1", program: { key: "grok" }, status: "idle" }], [{ id: "server/s1", machine: "server" }], opts);
   assert.equal(list.find(p => p.id === "grok").remote, true);
-  assert.equal(list.find(p => p.id === "opencode").windows.length, 0);
+  assert.equal(list.find(p => p.id === "opencode-go").windows.length, 0);
 });
 test("per-window and kind choices apply to redline summary", () => {
   const p = parse(report()).providers[0];

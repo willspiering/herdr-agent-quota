@@ -30,7 +30,7 @@ const percent = v => number(v) === null || v < 0 ? null : Math.min(100, v);
 export const stamp = v => typeof v === "string" && Number.isFinite(Date.parse(v)) ? Date.parse(v) : null;
 export function providerId(value) {
   const id = text(value).toLowerCase();
-  return ({ "claude-code": "claude", "claude code": "claude", "openai-codex": "codex", "cursor-agent": "cursor", "github-copilot": "copilot", "grok-code": "grok" })[id] ?? id;
+  return ({ "claude-code": "claude", "claude code": "claude", "openai-codex": "codex", "cursor-agent": "cursor", "github-copilot": "copilot", "grok-code": "grok", opencode: "opencode-go" })[id] ?? id;
 }
 export function options(start = {}, saved = {}) {
   const o = { ...DEFAULTS, ...start, ...saved };
