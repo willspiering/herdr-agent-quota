@@ -141,7 +141,7 @@ test("unchanged shared values are not rewritten", async () => {
 test("pane header suppresses local readings for a remote terminal", async () => {
   const host = await createHost({ mode: "header", data, runtime: { pane: "p1" }, paneList: [{ pane: "p1", terminal: "remote/t1", program: { key: "codex", name: "Codex", agent: true } }] });
   const text = flatten(host.tree());
-  assert.match(text, /remote · quota not linked/); assert.doesNotMatch(text, /78%/);
+  assert.match(text, /on remote · quota off/); assert.doesNotMatch(text, /78%/); assert.doesNotMatch(text, /not linked/);
 });
 test("pane headers schedule nothing: no timers, no tasks, no reads", async () => {
   const runs = [];

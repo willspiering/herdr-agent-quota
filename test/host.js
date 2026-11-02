@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as core from "../mods/agent-quota/core.js";
 import * as collector from "../mods/agent-quota/collector.js";
+import * as remoteModule from "../mods/agent-quota/remote.js";
 
 // What Herdr's exec does at its limits (herdr.d.ts: "30 s limit, 8 MiB output"). The binary's
 // message is "<program> took longer than 30 s and was stopped".
@@ -95,7 +96,7 @@ export function cappedExec(runner, { cap = EXEC_CAP_MS, onStop = () => {} } = {}
   });
 }
 
-export async function createHost({ nextCommand = () => new Promise(() => {}), mode = "dashboard", data = null, live = [], installed = [], paneList = [], spaceList = [], runtime = {}, runner, sharedState, clock, source: inputSource, coreModule = core, collectorModule = collector, execCap = EXEC_CAP_MS, layoutTree = null, adapters = [], files = {}, fetcher = async () => { throw Error("No network in tests"); } } = {}) {
+export async function createHost({ nextCommand = () => new Promise(() => {}), mode = "dashboard", data = null, live = [], installed = [], paneList = [], spaceList = [], runtime = {}, runner, sharedState, clock, source: inputSource, coreModule = core, collectorModule = collector, execCap = EXEC_CAP_MS, layoutTree = null, adapters = [], files = {}, remoteFiles = {}, machineList = [], fetcher = async () => { throw Error("No network in tests"); } } = {}) {
   const source = inputSource ?? await readFile(new URL("../mods/agent-quota/main.js", import.meta.url), "utf8");
   const state = sharedState ?? { [`${core.PREFIX}.data`]: copy(data), [`${core.PREFIX}.discovered`]: copy(installed) };
   const properties = { mode, ...runtime };
@@ -115,7 +116,9 @@ export async function createHost({ nextCommand = () => new Promise(() => {}), mo
   };
   const api = {
     exec: cappedExec(runner ?? (async () => { throw Error("Not installed"); }), { cap: execCap }),
-    appHome: () => "/preview", readTextFile: async path => files[path] ?? null,
+    // `{ on }` reads that machine's files (remoteFiles[machine][path]), as Herdr's connection does.
+    appHome: () => "/preview", readTextFile: async (path, opts) => (opts?.on ? remoteFiles[opts.on]?.[path] : files[path]) ?? null,
+    machines: () => machineList,
     knownAgents: async () => installed, agents: () => (reads.agents++, live), spaces: () => (reads.spaces++, spaceList), panes: () => paneList,
     theme: () => palette, settings: () => ({ dark: true, font_family: "JetBrains Mono" }),
     shared: name => { sharedReads.push(name); return copy(state[name]); },
@@ -127,7 +130,7 @@ export async function createHost({ nextCommand = () => new Promise(() => {}), mo
     layout: () => copy(layoutTree),
   };
   // Native providers are off unless a test supplies its own, and nothing reaches the network.
-  const deps = { ...constructors, ...api, ...coreModule, ...collectorModule, ADAPTERS: adapters, fetch: fetcher, home: () => "/home/tester", appWindow: () => ({ platform: "macos" }), Date: clock ? class extends Date { static now() { return clock.now; } } : Date };
+  const deps = { ...constructors, ...api, ...coreModule, ...collectorModule, ...remoteModule, ADAPTERS: adapters, fetch: fetcher, home: () => "/home/tester", appWindow: () => ({ platform: "macos" }), Date: clock ? class extends Date { static now() { return clock.now; } } : Date };
   const code = source.replace(/import[\s\S]*?from\s+"[^";]+";/g, "").replace("export function colors", "function colors").replace("export default class AgentQuota", "class AgentQuota");
   const AgentQuota = new Function(...Object.keys(deps), `${code}\nreturn AgentQuota;`)(...Object.values(deps));
   const view = new AgentQuota(); view.init(properties, cx);

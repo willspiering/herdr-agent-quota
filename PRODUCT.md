@@ -36,7 +36,9 @@ Account quota is shared between sessions; do not sum it across spaces.
 Quota availability depends on the provider and authentication. A CLI's
 presence alone does not prove measurable quota. Do not invent token counts,
 percentages, window durations or reset times. Remote agent activity must
-remain distinct from local account quota. Collection must be bounded and
+remain distinct from local account quota: another machine's quota is read only
+with the person's explicit opt-in, from that machine's own sign-in, and shown
+as its own lane, never merged with this computer's. Collection must be bounded and
 avoid inference requests. v1 does not associate arbitrary per-terminal
 credentials with a provider account.
 

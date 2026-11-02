@@ -1,7 +1,7 @@
 import { View, div, svg, image, PathBuilder, Background } from "gpui-kit";
 import { Button, h_flex, v_flex } from "gpui-base";
 import {
-  exec, home, readTextFile, knownAgents, agents, spaces, panes,
+  exec, home, readTextFile, knownAgents, agents, spaces, panes, machines,
   theme, settings, shared, setShared, props, openOverlay, closeOverlay, nextCommand, run, layout,
   window as appWindow,
 } from "herdr";
@@ -9,9 +9,11 @@ import {
   PREFIX, options, providerId, catalog, visibleWindows, shows, reading, windowState,
   elapsed, pace, resetLabel, shortLabel, redlines, ageLabel, remoteAgent, QuotaError,
   CADENCE, schedule, needsSweep, resetDue, targets, mergeReport, failure, failureAfter, forgetUnreadable,
+  forgetRemote, remoteMachines, consented, CONSENT, hideId,
 } from "./core.js";
 import { collect, READ_MS } from "./collector.js";
 import { ADAPTERS } from "./providers/index.js";
+import { remoteAdapters, REMOTE } from "./remote.js";
 
 const key = suffix => `${PREFIX}.${suffix}`;
 /** @returns {any} Application-owned, normalized shared state. */
@@ -89,6 +91,8 @@ export default class AgentQuota extends View {
     if (this.docked) this.mode = "dashboard";
     this.page = props()?.page === "configure" ? "configure" : "overview";
     this.selected = props()?.provider ?? null;
+    // A Settings section to show first and call out: "remote", from a remote pane's header.
+    this.callout = props()?.section === "remote" ? "remote" : null;
     // Requests to show a provider or page reach the panel through shared state; one made before
     // this copy started is not replayed.
     this.viewAt = this.docked ? get("view")?.at ?? 0 : 0;
@@ -124,6 +128,7 @@ export default class AgentQuota extends View {
         if (command === "settings") this.open(null, "configure");
         if (command === "refresh") this.refresh(cx);
         if (command === "look") this.tick(cx, { looking: true });
+        if (command === "remote") this.refresh(cx, { prompt: false });
       }
     });
   }
@@ -136,7 +141,7 @@ export default class AgentQuota extends View {
   // Everything one render needs, computed once rather than per gauge or row. Pane headers,
   // one copy per pane, read only their provider's limits, so they skip live agents and spaces.
   frame() {
-    const o = this.opts(), header = this.mode === "header";
+    const o = { ...this.opts(), remote: consented(get("remote")) }, header = this.mode === "header";
     const live = header ? [] : agents(), places = header ? [] : spaces();
     if (this.mode === "strip") this.observe(Date.now(), live);
     const paneId = header ? props()?.pane : null;
@@ -160,7 +165,7 @@ export default class AgentQuota extends View {
     // A failure leaves only the providers its read covered stale.
     const error = failure(get("error"));
     const stale = p => Boolean(error) && (error.providers === null || error.providers.includes(p.axi ?? p.id));
-    return { o, all, shown: all.filter(p => !o.hidden.includes(p.id) && useful(p)), now: Date.now(), failed: Boolean(error), error, stale,
+    return { o, all, shown: all.filter(p => !o.hidden.includes(hideId(p)) && useful(p)), now: Date.now(), failed: Boolean(error), error, stale,
       agents: live, spaces: places, pane, t: colors(theme(), config.dark !== false, o.palette), mono: typeof font === "string" ? font : "JetBrains Mono" };
   }
   state(w, p) { return windowState(w, p, this.f.now, this.f.stale(p)); }
@@ -176,14 +181,18 @@ export default class AgentQuota extends View {
 
   // A Refresh is never dropped silently: during a read the spinner shows it (whichever copy
   // reads); inside the cooldown it is queued, shown, and run when the cooldown ends.
-  refresh(cx) {
+  // `prompt: false` (turning other machines on) reads without this computer's Keychain prompts.
+  refresh(cx, { prompt = true } = {}) {
     const now = Date.now(), control = get("control");
     if (this.pending || control?.busyUntil > now) { cx.notify(); return; }
     const wait = CADENCE.manual - (now - (control?.attempt ?? 0));
-    if (wait <= 0) { this.read(cx, "refresh"); return; }
+    if (wait <= 0) { this.read(cx, "refresh", prompt); return; }
+    // A queued read prompts if any request it stands for may: a Refresh pressed after turning
+    // other machines on still gets its Keychain approval.
+    this.queuedPrompt = this.queued ? this.queuedPrompt || prompt : prompt;
     if (!this.queued) {
       this.queued = true;
-      cx.timer.after(wait, cx => { this.queued = false; this.read(cx, "refresh"); cx.notify(); });
+      cx.timer.after(wait, cx => { this.queued = false; this.read(cx, "refresh", this.queuedPrompt); cx.notify(); });
     }
     cx.notify();
   }
@@ -192,8 +201,8 @@ export default class AgentQuota extends View {
   // closing it, leaving an orphaned claim and no data. So it asks the long-lived strip (claimed in
   // ~0.1 s natively), and reads itself only if nothing was claimed within DELEGATE_MS (a layout
   // without the strip).
-  read(cx, why) {
-    const options = why === "look" ? { looking: true } : { force: true };
+  read(cx, why, prompt = true) {
+    const options = why === "look" ? { looking: true } : { force: true, prompt };
     if (this.mode !== "dashboard") { this.tick(cx, options); return; }
     const asked = Date.now();
     run(`agent-quota.${why}`);
@@ -214,7 +223,23 @@ export default class AgentQuota extends View {
     return live;
   }
 
-  tick(cx, { force = false, looking = false } = {}) {
+  // Other machines with a space here that Herdr can reach now.
+  reachable() {
+    let down = new Set();
+    try { down = new Set(machines().filter(m => m.name && m.layout === "unavailable").map(m => m.name)); } catch { /* older Herdr */ }
+    return remoteMachines(spaces()).filter(m => !down.has(m));
+  }
+  // The Settings switch. Off removes every other machine's reading at once; on reads now.
+  setRemote(on, cx) {
+    put("remote", on ? { v: CONSENT, on: true, at: Date.now() } : null);
+    // On: read now, without the Keychain prompts a Refresh may raise for this computer's sign-ins.
+    // As a Refresh does: the strip reads, or this copy does if no strip claims it.
+    if (on) { this.read(cx, "remote", false); return; }
+    const gone = forgetRemote(get("data"), get("error"));
+    put("data", gone.data); put("error", gone.error);
+  }
+
+  tick(cx, { force = false, looking = false, prompt = true } = {}) {
     const now = Date.now(), data = get("data") ?? null;
     let control = get("control") ?? null;
     // A copy stopped mid-read (reload, quit) leaves its claim behind. Clear it once it expires,
@@ -230,7 +255,11 @@ export default class AgentQuota extends View {
       working: live.some(a => a.status === "working"), finished: this.finishedAt > 0, resetDue: resetDue(data, control, now) });
     if (!reason) return;
     const sweep = needsSweep(control, now, reason);
-    const ids = sweep ? null : targets(data, get("discovered") ?? [], live);
+    // Other machines are read only with the person's consent (Settings · other machines), and
+    // only the ones connected now. Their readers ride along with every read.
+    const remote = consented(get("remote")) ? remoteAdapters(this.reachable()) : [];
+    const local = sweep ? null : targets(data, get("discovered") ?? [], live);
+    const ids = local && remote.length ? [...local, ...remote.map(a => a.id)] : local;
     this.pending = true;
     const token = `${this.id}-${now}`;
     // Claim synchronously before yielding: a second strip/dashboard sees it immediately.
@@ -252,9 +281,9 @@ export default class AgentQuota extends View {
       const legacy = !Array.isArray(control?.keychains) && (control?.keychain === true || (data?.providers ?? []).some(p => p.id === "claude" && p.windows.length > 0));
       const before = new Set([...(Array.isArray(control?.keychains) ? control.keychains : []), ...(legacy ? ["claude"] : [])]);
       const grants = {};
-      const keychain = id => (grants[id] ??= { allowed: before.has(id) || reason === "manual", granted: false, denied: false });
+      const keychain = id => (grants[id] ??= { allowed: before.has(id) || (reason === "manual" && prompt), granted: false, denied: false });
       // Native reads use Herdr's fetch and file reads; each request races this task's own timer.
-      const io = { exec, fetch: (url, init) => fetch(url, init), readTextFile, home, platform: appWindow().platform, adapters: ADAPTERS, keychain,
+      const io = { exec, fetch: (url, init) => fetch(url, init), readTextFile, home, platform: appWindow().platform, adapters: [...ADAPTERS, ...remote], keychain,
         sleep: ms => new Promise(resolve => { cx.timer.after(ms, () => resolve()); }) };
       try {
         result = await collect(io, Date.now(), ids, now + READ_MS);
@@ -273,19 +302,23 @@ export default class AgentQuota extends View {
       if (get("control")?.token !== token) { this.pending = false; return; }
       const known = (get("data")?.providers ?? []).map(p => p.axi).filter(Boolean);
       // A sweep also drops what no provider can read any more (see forgetUnreadable).
-      const swept = ids === null ? forgetUnreadable(get("data"), get("error"), new Set(ADAPTERS.map(a => a.id))) : { data: get("data"), error: get("error") };
+      // Another machine's reading goes too once remote reads are off or the machine is gone.
+      const swept = ids === null ? forgetUnreadable(get("data"), get("error"), new Set([...ADAPTERS, ...remote].map(a => a.id))) : { data: get("data"), error: get("error") };
       if (result) put("data", mergeReport(swept.data, result.report, result.swept));
       // What this read replaced is no longer stale; providers it couldn't read keep their earlier
       // readings and become stale. A read that failed outright leaves everything it covered stale.
       const after = result ? failureAfter(swept.error, { ids: result.cleared, known }) : failureAfter(swept.error, { message: error, ids: sweep ? null : ids, known });
       put("error", result?.failed ? failureAfter(after, { message: result.failed.message, ids: result.failed.ids, known }) : after);
+      // The switch may have been turned off while this read ran: what it brought back from other
+      // machines is dropped, so off always means off, whichever copy turned it off.
+      if (!consented(get("remote"))) { const gone = forgetRemote(get("data"), get("error")); put("data", gone.data); put("error", gone.error); }
       // Discovery isn't on the collection critical path and never holds its claim open.
       const discover = now - next.discoveredAt >= CADENCE.discover || (reason === "manual" && now - next.discoveredAt >= CADENCE.gap);
       if (discover) next.discoveredAt = now; // rate-limit failures too
       // A failed Keychain read forgets a grant only on a Refresh, with the user there to see the
       // prompt; in the background it may just be a locked Keychain after sleep.
       next.keychains = [...new Set([...before, ...Object.entries(grants).filter(([, g]) => g.granted).map(([id]) => id)])]
-        .filter(id => !(reason === "manual" && grants[id]?.denied)).sort();
+        .filter(id => !(reason === "manual" && prompt && grants[id]?.denied)).sort();
       put("control", next);
       this.pending = false;
       cx.notify();
@@ -301,18 +334,18 @@ export default class AgentQuota extends View {
 
   // `toggle` (the strip, its key and the open command) closes a shown panel; a targeted open
   // (a provider, Settings) always shows it. Without the column in the layout: the window.
-  open(provider = null, page = "overview", toggle = false) {
+  open(provider = null, page = "overview", toggle = false, section = null) {
     const node = panelNode();
     if (node) {
       const hidden = node.hidden === true; // layout() drops the key on a shown node
-      if (provider || page !== "overview") put("view", { provider, page, at: Date.now() });
+      if (provider || page !== "overview") put("view", { provider, page, section, at: Date.now() });
       run(toggle ? "layout.toggle" : "layout.show", { id: PANEL });
       // As the window did on open: read if the last reading is over a minute old. Never on close.
       if (hidden || !toggle) run("agent-quota.look");
       return;
     }
     openOverlay({ mod: "agent-quota", kind: "window", key: "agent-quota-dashboard", width: 850, height: 660,
-      props: { mode: "dashboard", provider, page, start: this.opts() } });
+      props: { mode: "dashboard", provider, page, section, start: this.opts() } });
   }
   dismiss() {
     if (this.docked) run("layout.hide", { id: PANEL });
@@ -360,7 +393,7 @@ export default class AgentQuota extends View {
       .tab_stop(true).tab_index(0).border(1).border_color(t.popover)
       .focus(s => s.border_color(t.accent)).cursor_pointer().hover(s => s.bg(t.hover))
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-      .on_click((_e, cx) => { cx.stop_propagation(); action(); })
+      .on_click((_e, cx) => { cx.stop_propagation(); action(cx); })
       .child(v_flex().flex_1().min_w(0).gap(2)
         .child(label(title, 12, t.foreground))
         .when(Boolean(hint), el => el.child(label(hint, 11, t.muted).truncate())))
@@ -518,6 +551,7 @@ export default class AgentQuota extends View {
       return h_flex().gap(7).items_center().flex_none().child(this.glyph(p, 12, t))
         .when(o.names, el => el.child(label(p.label, 11, t.foreground).max_w(90).truncate()))
         .when(p.multiAccount, el => el.child(label(`[${p.account}]`, 10, t.muted).max_w(60).truncate()))
+        .when(Boolean(p.machine), el => el.child(label(`@${p.machine}`, 10, t.muted).max_w(80).truncate()))
         .when(!ws.length, el => el.child(label("—", 11, t.muted)))
         .children(ws.map(w => this.stripWindow(w, p)));
     });
@@ -588,7 +622,8 @@ export default class AgentQuota extends View {
         .child(label(STATE_LABEL[a.status] ?? a.status, 11, t[a.status] ?? t.muted).w(72).flex_none())
         .child(label(where, 11, t.foreground).flex_1().min_w(0).truncate())
         .when(remote, el => el.child(label(machine ? `on ${machine}` : "remote", 10, t.muted).flex_none()
-          .tooltip("Runs on another machine. Its quota is not linked to this computer's sign-ins.")))
+          .tooltip(this.f.o.remote ? "Runs on another machine. That machine's quota shows as its own entry when its sign-in can be read."
+            : "Runs on another machine. Its quota isn't read unless you turn on other machines in Settings.")))
         .child(label("go to →", 10, t.muted).flex_none());
     })).children(this.pager(id, page, t));
   }
@@ -599,9 +634,14 @@ export default class AgentQuota extends View {
     const working = p.sessions.filter(a => a.status === "working").length;
     const blocked = p.sessions.filter(a => a.status === "blocked").length;
     const activity = blocked ? [`▲ ${blocked} needs you`, t.blocked] : working ? [`● ${working} working`, t.working] : p.sessions.length ? [`○ ${p.sessions.length} open`, t.muted] : ["not running", t.dim ?? t.muted];
-    const status = p.remote ? "Remote activity only" : p.windows.length && (p.stale || p.status !== "fresh") ? "Stale reading · refresh to verify" : p.reused ? "Recent cached reading" : null;
+    const where = p.machine ? ` on ${p.machine}` : "";
+    const status = p.remote ? "Running on another machine" : p.windows.length && (p.stale || p.status !== "fresh") ? "Stale reading · refresh to verify" : p.reused ? "Recent cached reading" : null;
     const empty = !p.windows.length
-      ? [p.status === "auth_required" ? `Sign in to ${p.label} to read its quota.` : p.remote ? "Quota for remote machines is not collected." : `${p.label} reported no quota.`, null]
+      ? p.status === "auth_required" ? [`Sign in to ${p.label}${where} to read its quota.`, null]
+        : p.status === "keychain" ? [`${p.label}${where} keeps its sign-in in that Mac's Keychain, which can't be read from here.`, null]
+        : p.remote && !o.remote ? ["Quota from other machines is off.", "Why?"]
+        : p.remote ? [REMOTE.some(r => r.id === p.id) ? "Waiting for that machine's first reading." : `${p.label}'s quota can't be read from another machine yet.`, null]
+        : [`${p.label}${where} reported no quota.`, null]
       : !ws.length ? ["All limits are hidden.", "Choose limits"] : null;
     let body;
     if (ws.length && o.dash === "gauges") {
@@ -613,6 +653,8 @@ export default class AgentQuota extends View {
       .child(h_flex().gap(8).items_center()
         .child(this.glyph(p, 16, t))
         .child(label(p.label, 14, t.foreground).font_semibold().flex_none())
+        .when(Boolean(p.machine), el => el.child(label(`on ${p.machine}`, 11, t.muted).max_w(160).truncate().flex_none()
+          .tooltip(`Read from ${p.machine}'s own sign-in, which may be a different account from this computer's.`)))
         .when(Boolean(p.plan), el => el.child(label(`[${p.plan}]`, 11, t.muted).flex_none()))
         .when(p.multiAccount, el => el.child(label(`account ${p.account}`, 11, t.muted).max_w(160).truncate().tooltip(p.account)))
         .child(div().flex_1().min_w(12).h(1).bg(t.border))
@@ -622,7 +664,9 @@ export default class AgentQuota extends View {
       .children(this.pager(limitId, limitPage, t))
       .when(Boolean(empty), el => el.child(h_flex().gap(10).items_center()
         .child(label(`— ${empty[0]}`, 12, t.muted))
-        .when(Boolean(empty[1]), el => el.child(this.button(`limits-${p.key}`, empty[1], (_e, cx) => { this.page = "configure"; cx.notify(); }, t, { small: true })))))
+        .when(Boolean(empty[1]), el => el.child(this.button(`limits-${p.key}`, empty[1], (_e, cx) => {
+          this.page = "configure"; this.callout = empty[1] === "Why?" ? "remote" : null; cx.notify();
+        }, t, { small: true })))))
       .when(p.sessions.length > 0, el => el.child(this.sessions(p)))
       .when(p.multiAccount && p.sessions.length > 0, el => el.child(label("Sessions are listed by provider; their account is not inferred.", 11, t.muted)));
   }
@@ -638,13 +682,36 @@ export default class AgentQuota extends View {
       .child(control);
   }
 
+  // Consent for other machines, in words a person can check: what is read, where it goes, what stays.
+  remoteSection() {
+    const { o, t } = this.f, names = remoteMachines(this.f.spaces), focus = this.callout === "remote";
+    const listed = names.length > 3 ? `${names.slice(0, 3).join(", ")} and ${names.length - 3} more` : names.join(", ");
+    const hint = o.remote ? (names.length ? `On · reading ${listed}` : "On · no other machines connected") : "Off · agents on other machines show activity only";
+    const line = text => label(text, 11, t.muted);
+    return v_flex().id("remote-section")
+      .child(this.section("── other machines", t))
+      .child(v_flex().gap(8).pb(4).rounded(6).when(focus, el => el.border(1).border_color(t.accent).pt(4))
+        .child(this.switchRow("remote-quota", "Show quota from other machines", hint, o.remote, cx => this.setRemote(!consented(get("remote")), cx), t))
+        .child(v_flex().px(10).pb(8).gap(6)
+          .child(line("Each machine keeps its own sign-ins. Normally this reads only this computer's, so an agent on another machine shows what it's doing but not its quota."))
+          .child(v_flex().gap(2)
+            .child(line("Turned on, for each connected machine it:"))
+            .child(line("· asks that machine for its home folder and system type"))
+            .child(line("· reads Claude's and Codex's sign-in file there, through Herdr's own connection"))
+            .child(line("· sends that token only to Claude's or Codex's usage service, from this computer"))
+            .child(line("· then drops it: never saved, logged or sent anywhere else")))
+          .child(line("Only percentages and reset times are kept, as for this computer. Sign-ins kept in a Mac's Keychain can't be read remotely and are left alone. Turning this off removes other machines' readings at once."))));
+  }
+
   configure() {
     const { o, t, all } = this.f;
     const set = change => this.save(change);
     const flip = field => () => set({ [field]: !this.opts()[field] });
     const preview = this.stripItems(this.width - 2 * this.pad());
     const providerPage = this.pageItems("configure-providers", all, PROVIDER_PAGE);
+    const remote = this.callout === "remote";
     return v_flex().pb(20)
+      .when(remote, el => el.child(this.remoteSection()))
       .child(this.section("── status bar", t))
       .child(h_flex().h(30).mx(10).mb(6).px(12).gap(14).items_center().justify_end().overflow_hidden().rounded(4)
         .bg(t.chrome).border(1).border_color(t.border)
@@ -666,13 +733,14 @@ export default class AgentQuota extends View {
       .child(this.switchRow("active-first", "Running agents first", "Agents you're using sort to the front.", o.activeFirst, flip("activeFirst"), t))
       .child(this.switchRow("signed-out", "Providers without quota", "List signed-out and unsupported providers too.", o.signedOut, flip("signedOut"), t))
       .children(providerPage.items.map(p => {
-        const visible = !o.hidden.includes(p.id);
+        const visible = !o.hidden.includes(hideId(p));
         const limitId = `choices-${p.key}`, limits = this.pageItems(limitId, p.windows, LIMIT_PAGE);
-        const hint = p.windows.length ? `${visibleWindows(p, o).length} of ${p.windows.length} limits shown` : p.status === "auth_required" ? "Sign-in needed" : p.remote ? "Remote activity only" : "No quota reported";
+        const hint = p.windows.length ? `${visibleWindows(p, o).length} of ${p.windows.length} limits shown` : p.status === "auth_required" ? "Sign-in needed"
+          : p.status === "keychain" ? "Sign-in in that Mac's Keychain" : p.remote ? "Running on another machine" : "No quota reported";
         return v_flex().gap(6)
-          .child(this.switchRow(`provider-${p.key}`, `${p.label}${p.multiAccount ? ` · ${p.account}` : ""}`, hint, visible, () => {
+          .child(this.switchRow(`provider-${p.key}`, `${p.label}${p.machine ? ` on ${p.machine}` : p.multiAccount ? ` · ${p.account}` : ""}`, hint, visible, () => {
             const hidden = this.opts().hidden;
-            set({ hidden: hidden.includes(p.id) ? hidden.filter(id => id !== p.id) : [...hidden, p.id] });
+            set({ hidden: hidden.includes(hideId(p)) ? hidden.filter(id => id !== hideId(p)) : [...hidden, hideId(p)] });
           }, t))
           .when(visible && p.windows.length > 0, el => el.child(h_flex().pl(10).pb(6).gap(6).flex_wrap().children(limits.items.map(w =>
             this.chip(`window-${w.key}`, shortLabel(w, p.windows), shows(w, o), () => {
@@ -681,10 +749,11 @@ export default class AgentQuota extends View {
             }, t)))).children(this.pager(limitId, limits, t)));
       }))
       .children(this.pager("configure-providers", providerPage, t))
+      .when(!remote, el => el.child(this.remoteSection()))
       .child(this.section("── about this data", t))
       .child(v_flex().px(10).gap(4)
         .child(label("Reads after an agent finishes a turn (at most once a minute), every 3 minutes while agents work, and every 10 minutes otherwise. Never makes inference requests.", 11, t.muted))
-        .child(label("Reads each agent's existing sign-in and asks only its own usage service, directly. Never refreshes a sign-in. Stores only percentages, reset times and your choices here.", 11, t.muted))
+        .child(label("Reads each agent's existing sign-in and asks only its own usage service, directly. Never refreshes a sign-in. Stores only percentages, reset times and your choices here. Other machines are read only if you turn them on above.", 11, t.muted))
         .child(label("Token counts are unavailable unless a provider reports them.", 11, t.muted)));
   }
 
@@ -727,7 +796,7 @@ export default class AgentQuota extends View {
           .when(busy, el => el.child(div().w(10).text_color(t.muted).frames(SPINNER, 90).child(SPINNER[0]))))
         .when(this.docked || Boolean(props()?.overlay), el => el.child(this.button("close", "✕", () => this.dismiss(), t, { a11y: "Close" }))))
       .child(h_flex().px(pad).pb(12).gap(8).items_center().flex_none()
-        .child(this.segmented("page", [["overview", "Overview"], ["configure", "Settings"]], this.page, (v, cx) => { this.page = v; cx.notify(); }, t))
+        .child(this.segmented("page", [["overview", "Overview"], ["configure", "Settings"]], this.page, (v, cx) => { this.page = v; this.callout = null; cx.notify(); }, t))
         .when(!narrow, el => el.child(div().flex_1()).child(this.legend())))
       .when(narrow, el => el.child(h_flex().px(pad).pb(10).flex_none().child(this.legend())))
       .child(rule(t))
@@ -739,7 +808,7 @@ export default class AgentQuota extends View {
         .child(body))
       .child(rule(t))
       .child(h_flex().px(pad).py(10).flex_none()
-        .child(label("Quota is per account and shared across spaces · remote sessions show activity only", 10, t.muted).truncate()));
+        .child(label(`Quota is per account and shared across spaces · ${o.remote ? "other machines read with your permission" : "other machines show activity only"}`, 10, t.muted).truncate()));
   }
 
   // Teaches the meter once: what fills, where redline starts, and what the white tick is.
@@ -762,19 +831,27 @@ export default class AgentQuota extends View {
     if (!p) return div();
     const name = p.program?.name ?? p.title ?? "Terminal";
     const id = providerId(p.program?.key || p.app);
-    const lanes = this.f.all.filter(a => a.id === id);
+    // A terminal on another machine shows that machine's own reading, never this computer's.
+    const slash = p.terminal?.indexOf("/") ?? -1, machine = slash > 0 ? p.terminal.slice(0, slash) : null;
+    const lanes = this.f.all.filter(a => a.id === id && (a.machine ?? null) === machine);
     const single = lanes.length === 1 ? lanes[0] : null;
     const ws = single ? visibleWindows(single, o).slice(0, 2) : [];
-    const remote = Boolean(p.terminal?.includes("/"));
-    const quota = remote ? "remote · quota not linked" : lanes.length > 1 ? "choose account"
-      : ws.length ? `${ws.map(w => `${shortLabel(w, single.windows)} ${this.value(w, this.state(w, single))}`).join(" · ")}${o.metric === "left" ? " left" : ""}` : "quota —";
+    const values = ws.length ? `${ws.map(w => `${shortLabel(w, single.windows)} ${this.value(w, this.state(w, single))}`).join(" · ")}${o.metric === "left" ? " left" : ""}` : null;
+    const off = Boolean(machine) && !o.remote;
+    const quota = off ? `on ${machine} · quota off` : machine ? `on ${machine} · ${values ?? "quota —"}`
+      : lanes.length > 1 ? "choose account" : values ?? "quota —";
+    const hint = off ? `Quota from other machines is off. Click to see why, and to turn it on.`
+      : machine && !values ? (single?.status === "keychain" ? `${name} on ${machine} keeps its sign-in in that Mac's Keychain, which can't be read from here.`
+        : single?.status === "auth_required" ? `${name} on ${machine} isn't signed in.` : REMOTE.some(r => r.id === id) ? `No reading from ${machine} yet.` : `${name}'s quota can't be read from another machine yet.`) : null;
     return h_flex().id(`quota-pane-${p.pane}`).size_full().px(10).gap(8).items_center().bg(t.background).border_b(1).border_color(t.border)
       .on_click(() => run("pane.focus", { pane: p.pane }))
       .child(this.glyph({ id, label: name, program: p.program }, 13, t))
       .child(label(name, 12, t.foreground).max_w(150).truncate())
       .child(label(p.cwd ?? "", 11, t.muted).flex_1().min_w(0).truncate())
       .when(Boolean(p.status), el => el.child(label(STATE_LABEL[p.status] ?? p.status, 11, t[p.status] ?? t.muted)))
-      .when(p.program?.agent === true, el => el.child(this.button(`quota-for-${p.pane}`, quota, () => this.open(id), t, { small: true, a11y: `Open ${p.program?.name ?? "agent"} quota` }).font_family(this.f.mono)))
+      .when(p.program?.agent === true, el => el.child(this.button(`quota-for-${p.pane}`, quota, () => off ? this.open(null, "configure", false, "remote") : this.open(id), t,
+        { small: true, a11y: off ? "Quota from other machines is off: open its setting" : `Open ${p.program?.name ?? "agent"} quota` }).font_family(this.f.mono)
+        .when(Boolean(hint), el => el.tooltip(hint))))
       .child(this.button(`split-${p.pane}`, "Split", () => run("pane.split", { pane: p.pane, direction: "right" }), t, { small: true }))
       .child(this.button(`zoom-${p.pane}`, p.zoomed ? "Restore" : "Zoom", () => run("pane.zoom", { pane: p.pane }), t, { small: true }))
       .child(this.button(`close-${p.pane}`, "Close", () => run("pane.close", { pane: p.pane }), t, { small: true }));
@@ -787,6 +864,7 @@ export default class AgentQuota extends View {
     this.viewAt = view.at;
     this.selected = typeof view.provider === "string" ? view.provider : null;
     this.page = view.page === "configure" ? "configure" : "overview";
+    this.callout = view.section === "remote" ? "remote" : null;
   }
 
   render(cx) {

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Agents on other machines: the pane header now says `on <machine> · quota off`
+  instead of "remote · quota not linked", and opens a new Settings section,
+  **other machines**, that explains what is read and where it goes. Turning it
+  on reads each connected machine's Claude and Codex sign-in file over Herdr's
+  connection and shows that machine's quota as its own `on <machine>` lane, in
+  the dashboard, the strip and that machine's pane headers. Off by default;
+  turning it off removes those readings.
 - Quota is read natively with Herdr's `fetch`: no Node, no npm packages and no
   background process at runtime. Each read used to start two Node processes
   (a supervisor and quota-axi) peaking around 120 MB; now a read runs in Herdr

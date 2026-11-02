@@ -119,7 +119,13 @@ writes. Short limit names must stay unique per provider (Copilot has three
 monthly pools). An explicit per-limit choice overrides its kind default.
 
 Quota is per account, never per pane. Keep multiple accounts separate and
-do not infer a terminal's account. Remote activity is unlinked to local quota.
+do not infer a terminal's account. Remote activity is never shown with local
+quota. With Settings · other machines on (off by default, explained in place),
+each connected machine's Claude and Codex sign-in files are read over Herdr's
+connection (`readTextFile(path, { on })`, home and OS from `printenv HOME` and
+`uname -s` there) and shown as `on <machine>` lanes; a remote pane header shows
+only its machine's lane. Off, the header says `on <machine> · quota off` and
+opens that setting.
 Unknown percentages stay unknown. A past reset suppresses the old value;
 stale values are historical and never count toward redline alerts. Used-share
 windows are not independent quota pools. Provider durations and limits vary.
@@ -193,5 +199,6 @@ they reach shared state. No inference requests.
   provider and on Settings, hides with `✕`/Escape, and closing starts no read.
 - Window dragging, keyboard focus, Escape, Settings and Go to agent work in Herdr.
 - Restarting preserves settings; multiple surfaces still share one collector.
-- Remote activity is explicitly unlinked and expired data never looks fresh.
+- Remote activity never shows local quota; remote quota needs the opt-in, and
+  expired data never looks fresh.
 - A real `preview.png` from Herdr is available before sharing publicly.

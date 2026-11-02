@@ -5,22 +5,26 @@ import { ReadFailure } from "./providers/common.js";
 // The longest a read runs. Native reads race their own timer, so a hung request, a Keychain prompt
 // left open or a slow local process never holds the read past this; the claim outlives it.
 export const READ_MS = 25000;
-const ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+// A provider here (`claude`), or on another machine (`claude@splinter`, see remote.js).
+const ID = /^[a-z0-9][a-z0-9_-]{0,63}(@[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$/;
 
 // Not failures: the provider is fine but has nothing to read now (Antigravity closed, a sign-in
-// without consumer credits, an app that exposes no endpoint). Earlier readings stay and age to
-// stale; nothing backs off and no error is shown.
-const QUIET = new Set(["not-running", "no-quota", "no-endpoint"]);
+// without consumer credits, an app that exposes no endpoint, another machine that is offline).
+// Earlier readings stay and age to stale; nothing backs off and no error is shown.
+const QUIET = new Set(["not-running", "no-quota", "no-endpoint", "offline"]);
 // What failed providers' reasons tell the user to do. Our own words only. A specific hint only
 // when every failed provider shares it, so one provider's reason is never pinned on another.
 function failureMessage(failures) {
-  const labels = failures.map(f => f.label), reasons = new Set(failures.map(f => f.error?.message));
+  // Machine names can be long: each label is bounded, so the instruction always fits.
+  const labels = failures.map(f => f.label.length > 40 ? `${f.label.slice(0, 39)}…` : f.label), reasons = new Set(failures.map(f => f.error?.message));
   // Short enough that the instruction always survives the 160-character limit.
   const who = labels.length > 2 ? `${labels.slice(0, 2).join(", ")} and ${labels.length - 2} more` : labels.join(" and ");
   const one = reasons.size === 1 ? [...reasons][0] : null;
   if (one === "expired") return `${who}: sign-in expired. Open it once to renew; earlier readings were kept.`;
   if (one === "keychain") return `${who}: needs one Keychain approval. Press Refresh in the quota dashboard and allow it.`;
-  return `${who}: quota could not be read. Earlier readings were kept; retries back off.`;
+  // Other machines never back off this computer's schedule (see `backoff` below), so only say so here.
+  const here = failures.some(f => !f.id.includes("@"));
+  return `${who}: quota could not be read. Earlier readings were kept${here ? "; retries back off" : ""}.`;
 }
 
 // Read quota with Herdr's fetch, every selected provider side by side.
@@ -49,12 +53,14 @@ export async function collect(io, now = Date.now(), providers = null, deadline =
   const quiet = results.filter(r => r.error instanceof ReadFailure && QUIET.has(r.error.message));
   const bad = results.filter(r => r.error && !quiet.includes(r)), good = results.filter(r => !r.error);
   const message = bad.length ? failureMessage(bad).slice(0, 160) : null;
-  if (bad.length && !good.length && !quiet.length) throw new QuotaError(message);
+  // Nothing read at all fails the read, unless only other machines failed: they never back it off.
+  if (bad.length && !good.length && !quiet.length && bad.some(r => !r.id.includes("@"))) throw new QuotaError(message);
   const report = { schema: 5, at: now, providers: good.flatMap(r => r.providers) };
   // A sweep replaces everything only when every provider answered; otherwise it merges. A quiet
   // provider isn't failing, so its old stale flag clears (`cleared`) though its reading stays.
   // Waiting for a Keychain approval is the user's to give, not a reason to back everything off.
   const complete = ids === null && !bad.length && !quiet.length;
   return { report, swept: complete, read: complete ? null : good.map(r => r.id), cleared: complete ? null : [...good, ...quiet].map(r => r.id),
-    failed: bad.length ? { message, ids: bad.map(r => r.id), backoff: bad.some(r => r.error?.message !== "keychain") } : null };
+    // Another machine failing never slows this computer's schedule: it just keeps its old reading.
+    failed: bad.length ? { message, ids: bad.map(r => r.id), backoff: bad.some(r => r.error?.message !== "keychain" && !r.id.includes("@")) } : null };
 }

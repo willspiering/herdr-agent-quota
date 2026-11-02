@@ -40,6 +40,10 @@ export function options(start = {}, saved = {}) {
     kinds: { ...DEFAULTS.kinds, ...start.kinds, ...saved.kinds },
     windows: Object.fromEntries(Object.entries({ ...start.windows, ...saved.windows }).filter(([, v]) => typeof v === "boolean")),
     redline: [60, 70, 80, 90].includes(o.redline) ? o.redline : 70,
+    // Consent to read other machines lives in its own shared key, written only by the Settings
+    // switch (see `consented`), never in options: older builds saved every layout prop into
+    // options, so a `remote` found here could come from a shared layout file. Always off here.
+    remote: false,
     ...Object.fromEntries(Object.entries(CHOICES).map(([k, list]) => [k, list.includes(o[k]) ? o[k] : DEFAULTS[k]])),
   };
 }
@@ -83,7 +87,10 @@ export function normalizeReport(report, now = Date.now()) {
     const id = providerId(p.provider);
     if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id)) continue;
     const account = text(p.accountKey, "", 160) || (Array.isArray(p.accountKeys) ? p.accountKeys.map(x => text(x, "", 160)).filter(Boolean).sort().join("+") : "") || "default";
-    const key = JSON.stringify([id, account]);
+    // A lane read from another machine is its own lane, never merged with this computer's: the
+    // two sign-ins may be different accounts. Local keys are unchanged, so saved choices stay.
+    const machine = typeof p.machine === "string" && MACHINE.test(p.machine) ? p.machine : null;
+    const key = JSON.stringify(machine ? [id, account, machine] : [id, account]);
     if (lanes.has(key)) throw new QuotaError("Collector returned duplicate account lanes.");
     lanes.add(key);
     // quota-axi put these under `state` in readings older builds stored; native lanes at the top.
@@ -114,12 +121,13 @@ export function normalizeReport(report, now = Date.now()) {
     });
     const refreshed = stamp(p.state?.refreshedAt);
     const name = ({ codex: "Codex", claude: "Claude", grok: "Grok", cursor: "Cursor", copilot: "GitHub Copilot", kimi: "Kimi", "opencode-go": "OpenCode Go" })[id] ?? id;
-    providers.push({ id, key, account, label: text(p.label, name), plan: text(p.plan) || null,
+    providers.push({ id, key, account, machine, label: text(p.label, name), plan: text(p.plan) || null,
       status: text(p.state?.status, "unknown"), stale: p.state?.stale === true,
       at: refreshed !== null ? Math.min(refreshed, at) : at,
       reused: p.state?.reused === true, windows,
-      // quota-axi's own id, for targeted reads. Validated, never shell text.
-      axi: /^[a-z0-9][a-z0-9_-]{0,63}$/.test(p.provider) ? p.provider : null,
+      // The reader's id, for targeted reads and stale flags: `claude`, or `claude@splinter` for
+      // another machine's. Validated, never shell text.
+      axi: /^[a-z0-9][a-z0-9_-]{0,63}$/.test(p.provider) ? (machine ? `${p.provider}@${machine}` : p.provider) : null,
     });
   }
   return { schema: report.schemaVersion, at, providers };
@@ -169,16 +177,34 @@ export function visibleWindows(p, o) { return p.windows.filter(w => shows(w, o))
 export function reading(w, o) { return o.metric === "left" ? 100 - w.percentUsed : w.percentUsed; }
 export function activeProvider(a) { return providerId(a.program?.key || a.app); }
 export function remoteAgent(a, spaces) { return a.address?.includes("/") || Boolean(spaces.find(s => s.id === a.space)?.machine); }
+// Consent to read other machines: the record the Settings switch writes, and nothing else.
+export const CONSENT = 1;
+export const consented = record => record?.v === CONSENT && record.on === true;
+// The id a lane is hidden by: per machine, so hiding another machine's lane keeps this one's.
+export const hideId = p => p.machine ? `${p.id}@${p.machine}` : p.id;
+// Machine names as Herdr gives them (`hc machine ls`); anything else is never used as a name.
+export const MACHINE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+// The machine an agent runs on (null: this computer): its space's, else its address prefix.
+export function machineOf(a, machines) {
+  const named = machines.get(a.space);
+  if (named) return named;
+  const slash = typeof a.address === "string" ? a.address.indexOf("/") : -1;
+  return slash > 0 ? a.address.slice(0, slash) : null;
+}
+// The other machines with a space here: the ones whose sign-ins a remote read may ask for.
+export function remoteMachines(spaces) {
+  return [...new Set(spaces.map(s => s.machine).filter(m => typeof m === "string" && MACHINE.test(m)))].sort();
+}
 
 export function catalog(report, discovered, live, spaces, o) {
-  const list = (report?.providers ?? []).map(p => ({ ...p, installed: false, sessions: [], remote: false }));
+  const list = (report?.providers ?? []).map(p => ({ ...p, machine: p.machine ?? null, installed: false, sessions: [], remote: false }));
   const byId = new Map();
   const machines = new Map(spaces.map(s => [s.id, s.machine]));
   const activity = new Map();
   for (const p of list) { if (!byId.has(p.id)) byId.set(p.id, []); byId.get(p.id).push(p); }
   const ensure = (id, label) => {
     if (!byId.has(id)) {
-      const p = { id, key: JSON.stringify([id, "default"]), account: "default", label, windows: [], status: "unavailable", at: 0, installed: false, sessions: [], remote: false };
+      const p = { id, key: JSON.stringify([id, "default"]), account: "default", machine: null, label, windows: [], status: "unavailable", at: 0, installed: false, sessions: [], remote: false };
       list.push(p); byId.set(id, [p]);
     }
     return byId.get(id);
@@ -186,35 +212,43 @@ export function catalog(report, discovered, live, spaces, o) {
   for (const a of discovered) {
     if (!a.installed) continue;
     const id = providerId(a.key);
-    for (const p of ensure(id, a.name || id)) { p.installed = true; p.program = a; }
+    for (const p of ensure(id, a.name || id)) if (!p.machine) { p.installed = true; p.program = a; }
   }
   for (const a of live) {
     const id = activeProvider(a);
     if (!id) continue;
-    if (!activity.has(id)) activity.set(id, { sessions: [], local: [], remote: [], program: a.program, urgency: 0 });
+    if (!activity.has(id)) activity.set(id, { sessions: [], local: [], remote: [], on: new Map(), program: a.program, urgency: 0 });
     const group = activity.get(id);
     group.sessions.push(a);
-    (a.address?.includes("/") || machines.get(a.space) ? group.remote : group.local).push(a);
+    const machine = machineOf(a, machines);
+    (machine ? group.remote : group.local).push(a);
+    if (machine) { if (!group.on.has(machine)) group.on.set(machine, []); group.on.get(machine).push(a); }
     group.urgency = Math.max(group.urgency, a.focused ? 4 : a.status === "working" ? 3 : a.status === "blocked" ? 2 : 1);
     ensure(id, a.program?.name || id);
   }
   for (const p of list) {
     const group = activity.get(p.id);
+    const lanes = byId.get(p.id) ?? [];
     // The activity belongs to a provider, never a particular account. Classify once,
     // then share read-only arrays across its lanes instead of scanning spaces per lane.
-    p.sessions = group?.sessions ?? [];
-    p.localSessions = group?.local ?? [];
-    p.remoteSessions = group?.remote ?? [];
+    // A machine with its own lane takes its sessions; this computer's lanes keep the rest.
+    const own = new Set(lanes.map(l => l.machine).filter(Boolean));
+    p.sessions = p.machine ? group?.on.get(p.machine) ?? []
+      : own.size ? (group?.sessions ?? []).filter(a => !own.has(machineOf(a, machines))) : group?.sessions ?? [];
+    p.localSessions = p.machine ? [] : group?.local ?? [];
+    p.remoteSessions = p.machine ? p.sessions : own.size ? (group?.remote ?? []).filter(a => !own.has(machineOf(a, machines))) : group?.remote ?? [];
     p.program ??= group?.program;
-    p.remote = p.sessions.length > 0 && p.localSessions.length === 0 && !p.installed && !p.windows.length;
-    p.multiAccount = (byId.get(p.id)?.length ?? 0) > 1;
+    p.remote = !p.machine && p.sessions.length > 0 && p.localSessions.length === 0 && !p.installed && !p.windows.length;
+    // Accounts are told apart on this computer; another machine's lane is labeled by its machine.
+    p.multiAccount = !p.machine && lanes.filter(l => !l.machine).length > 1;
   }
   const favorites = new Map();
   o.favorites.forEach((id, i) => { if (!favorites.has(id)) favorites.set(id, i); });
   const fav = id => favorites.get(id) ?? 1000;
   const urgency = p => activity.get(p.id)?.urgency ?? 0;
   return list.filter(p => p.installed || p.sessions.length || p.windows.length || o.signedOut)
-    .sort((a, b) => (o.activeFirst ? urgency(b) - urgency(a) : 0) || fav(a.id) - fav(b.id) || a.label.localeCompare(b.label) || a.account.localeCompare(b.account));
+    .sort((a, b) => (o.activeFirst ? urgency(b) - urgency(a) : 0) || fav(a.id) - fav(b.id) || a.label.localeCompare(b.label)
+      || (a.machine ?? "").localeCompare(b.machine ?? "") || a.account.localeCompare(b.account));
 }
 
 /** @param {boolean | ((p: any) => boolean)} [failed] Whether a provider's last read failed. */
@@ -271,7 +305,7 @@ export function resetDue(data, control, now) {
 // Providers worth a routine read: anything with limits, or an agent installed or running here.
 export function targets(data, discovered = [], live = []) {
   const wanted = new Set([...discovered.filter(a => a.installed).map(a => providerId(a.key)), ...live.map(activeProvider)]);
-  const ids = (data?.providers ?? []).filter(p => p.axi && (p.windows.length || wanted.has(p.id))).map(p => p.axi);
+  const ids = (data?.providers ?? []).filter(p => p.axi && !p.machine && (p.windows.length || wanted.has(p.id))).map(p => p.axi);
   return ids.length ? [...new Set(ids)].sort() : null;
 }
 // A targeted read replaces only the providers it covers; a sweep replaces everything.
@@ -283,8 +317,16 @@ export function forgetUnreadable(data, error, readable) {
   return { data: data ? { ...data, providers: data.providers.filter(keep) } : data,
     error: !before ? null : providers === null || providers.length ? { ...before, providers } : null };
 }
+// A lane's reader: this computer's provider, or that provider on one other machine.
+const reader = p => p.machine ? `${p.id}@${p.machine}` : p.id;
 export function mergeReport(previous, next, swept) {
   if (swept || !previous) return next;
-  const read = new Set(next.providers.map(p => p.id));
-  return { ...next, providers: [...previous.providers.filter(p => !read.has(p.id)), ...next.providers] };
+  const read = new Set(next.providers.map(reader));
+  return { ...next, providers: [...previous.providers.filter(p => !read.has(reader(p))), ...next.providers] };
+}
+// Turning remote reads off removes every other machine's reading and stale flag at once.
+export function forgetRemote(data, error) {
+  const before = failure(error), providers = before?.providers ? before.providers.filter(id => !id.includes("@")) : null;
+  return { data: data ? { ...data, providers: data.providers.filter(p => !p.machine) } : data,
+    error: !before ? null : providers === null || providers.length ? { ...before, providers } : null };
 }

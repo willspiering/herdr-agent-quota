@@ -318,3 +318,43 @@ difference is under the run-to-run spread). Memory is 1–2 MB higher (RSS and
 footprint), the size of the mod's copies. JavaScript is under 0.5% of the main
 thread on both. The earlier 7–13% readings in this session reflected the
 terminal workload of the session driving the test, not the mod.
+
+## Quota from other machines, 2026-11-02
+
+Opt-in remote reads (`remote.js`, Settings · other machines), checked natively
+against `splinter` (Linux, Herdr 0.1.16, connected over Tailscale SSH), on
+Herdr's macOS app on this Mac.
+
+- Off by default. A splinter pane header showed `on splinter · quota off`;
+  clicking it opened Settings with the other-machines section first.
+- Turned on by the person in Settings. The first read found both lanes:
+  `Claude on splinter` (19% session, 57% week) and `Codex on splinter` (1%
+  session, 14% week), equal to this Mac's because both machines use the same
+  accounts. No error, `failures: 0`, no Keychain prompt.
+- Stored state holds only the consent record `{ v: 1, on: true, at }` and
+  normalized lanes with `machine: "splinter"`; no credential fields.
+- Token trace search after the read, printing counts only (patterns
+  `sk-ant-o`, `eyJhbGci`, `access_token`, `accessToken`, `refresh_token`,
+  `refreshToken`, `claudeAiOauth`, `id_token`):
+  - This Mac: 642 Herdr files (`~/.config/herdr`, `~/.config/herdr-app`,
+    `~/.local/state/herdr*`, `$TMPDIR/herdr*`). Only matches were field names
+    in the mod's own source; zero token prefixes. No Herdr log written after
+    the switch was turned on.
+  - splinter: 593 Herdr files, zero matches, no Herdr log written during the
+    reads; the user journal had zero token signatures (its only Herdr lines were
+    the app starting before the switch was turned on).
+- Commands run on splinter by the mod: `printenv HOME`, `uname -s`. Nothing
+  else; Keychain lookups are blocked for remote reads.
+
+Security review: an independent reviewer (no build context) found six issues,
+all fixed and covered by `test/remote.test.js` (consent survives a mid-read
+switch-off; layout props and older saved options can't grant consent; header
+values must be printable ASCII; a failing or slow machine is cut at 8 s and
+never backs off this computer's reads; a dropped file read keeps the earlier
+reading; switching on never raises this Mac's Keychain prompt). A second pass
+verified the fixes and found no new security issue. `npm test` 196/196,
+typecheck 0 errors, `npm run check` passed.
+
+Not checked: a remote macOS machine (its Keychain sign-ins are reported, not
+read), a Windows machine (skipped as unsupported), and a remote that goes
+offline mid-read natively (covered by tests only).

@@ -56,8 +56,16 @@ npm run check
 npm run benchmark
 ```
 
-This is an early v1. Remote-account quota collection and absolute token counts
-are not implemented. Known issues and validation notes are in
+Agents on other machines (`hc machine ls`) show their activity. Their quota is
+read only after you turn on **Settings · other machines**: for each connected
+machine, the mod asks for its home folder and system type (`printenv HOME`,
+`uname -s`), reads Claude's and Codex's sign-in file there over Herdr's own
+connection, sends the token only to that provider's usage service from this
+computer, and drops it. Each machine's reading is its own lane, labeled
+`on <machine>`, since it may be a different account. Sign-ins kept in a Mac's
+Keychain can't be read remotely. Turning the switch off removes those readings.
+
+This is an early v1. Absolute token counts are not implemented. Known issues and validation notes are in
 [VALIDATION.md](VALIDATION.md). The performance review and remaining native
 checks are in [PERFORMANCE_REVIEW.md](PERFORMANCE_REVIEW.md).
 

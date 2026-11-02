@@ -68,6 +68,10 @@ export function within(io, ms, promise) {
 
 // GET a JSON document. A rejected credential is an answer ({ auth: true }), not a failure.
 export async function getJson(io, url, headers) {
+  // Header values come from sign-in files, which on another machine are that machine's to write.
+  // A value with a line break or other control character could forge extra headers: refuse it.
+  // Printable ASCII only: no line breaks, and nothing a byte-narrowing HTTP stack could turn into one.
+  if (Object.values(headers).some(v => typeof v !== "string" || !/^[\x20-\x7e]{0,16384}$/.test(v))) throw new ReadFailure("malformed");
   let response;
   try { response = await within(io, REQUEST_MS, io.fetch(url, { headers })); }
   catch { throw new ReadFailure("unreachable"); }

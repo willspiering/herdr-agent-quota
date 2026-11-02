@@ -9,7 +9,8 @@ Read `PRODUCT.md`, `DESIGN.md` and the installed Herdr
 - `collector.js` reads every provider natively (`providers/`, Herdr's `fetch`),
   without inference or credential refresh. Tokens never leave the read that
   uses them; only the vendor's own host receives them. No Keychain prompt from
-  a background read.
+  a background read. Another machine's sign-in file is read (`remote.js`) only
+  when the person turned on Settings · other machines.
   Never persist raw reports, subprocess diagnostics, credentials or account PII.
 - Use Herdr reactive agent data. Do not scrape terminals or conversation logs.
 - Preserve shipped Herdr files; install into a cloned layout.
