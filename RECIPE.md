@@ -30,7 +30,11 @@ pace. Gauges: 30 segments on a 240° arc, 140px, 24px value. Sessions are whole
 rows: mark, status, `space / tab`, `go to →`, for this computer's agents only.
 Settings: `── status bar` (live strip preview, Style, Show, names switch),
 `── dashboard` (Meters/Gauges, Terminal/Classic), `── redline` (60–90%),
-`── providers` (switches, per-limit chips), `── about this data`.
+`── providers` (a switch per provider hides it everywhere; under it, two
+labeled rows: `Show in` with a `Status bar` chip that takes it off the status
+bar only, keeping it in the dashboard and pane headers, and `Limits`, chips
+for which of its limits show on every surface), `── about this data`. A pane header shows its
+agent's figure only when there's a reading; otherwise it shows none.
 
 ## How it behaves
 

@@ -159,7 +159,8 @@ export default class AgentQuota extends View {
     } else report = get("data");
     const all = header ? report.providers : catalog(report, get("discovered") ?? [], live, places, o);
     // Overview lists what can be read or acted on; Settings lists everything.
-    const useful = p => p.windows.length || p.sessions.length || p.status === "auth_required" || o.signedOut;
+    // Pane headers skip the catalog, so their lanes have no sessions.
+    const useful = p => p.windows.length || p.sessions?.length || p.status === "auth_required" || o.signedOut;
     const config = settings(), font = config.font_family;
     // A failure leaves only the providers its read covered stale.
     const error = failure(get("error"));
@@ -508,7 +509,7 @@ export default class AgentQuota extends View {
   stripItems(width) {
     const { o, t, shown } = this.f;
     // Quiet by default: only providers with something to read or something running.
-    const candidates = shown.filter(p => visibleWindows(p, o).length || p.sessions.length);
+    const candidates = shown.filter(p => !o.offStrip.includes(p.id) && (visibleWindows(p, o).length || p.sessions.length));
     const maxWindows = width < 320 ? 1 : 2;
     let budget = width - 50;
     const fits = [];
@@ -668,13 +669,26 @@ export default class AgentQuota extends View {
       .children(providerPage.items.map(p => {
         const visible = !o.hidden.includes(p.id);
         const limitId = `choices-${p.key}`, limits = this.pageItems(limitId, p.windows, LIMIT_PAGE);
-        const hint = p.windows.length ? `${visibleWindows(p, o).length} of ${p.windows.length} limits shown` : p.status === "auth_required" ? "Sign-in needed" : "No quota reported";
+        const inStrip = !o.offStrip.includes(p.id);
+        const hint = `${p.windows.length ? `${visibleWindows(p, o).length} of ${p.windows.length} limits shown` : p.status === "auth_required" ? "Sign-in needed" : "No quota reported"}${visible && !inStrip ? " · not in the status bar" : ""}`;
         return v_flex().gap(6)
           .child(this.switchRow(`provider-${p.key}`, `${p.label}${p.multiAccount ? ` · ${p.account}` : ""}`, hint, visible, () => {
             const hidden = this.opts().hidden;
             set({ hidden: hidden.includes(p.id) ? hidden.filter(id => id !== p.id) : [...hidden, p.id] });
           }, t))
-          .when(visible && p.windows.length > 0, el => el.child(h_flex().pl(10).pb(6).gap(6).flex_wrap().children(limits.items.map(w =>
+          // Two labeled rows, so neither reads as the other's: where the provider shows (off the
+          // status bar only, the dashboard and pane headers keep it), then which of its limits show
+          // wherever it does.
+          .when(visible, el => el.child(h_flex().pl(10).pb(p.windows.length ? 0 : 6).gap(6).items_center().flex_wrap()
+            .child(label("Show in", 11, t.muted).w(56).flex_none())
+            .child(this.chip(`strip-${p.key}`, "Status bar", inStrip, () => {
+              const off = this.opts().offStrip;
+              set({ offStrip: off.includes(p.id) ? off.filter(id => id !== p.id) : [...off, p.id] });
+            }, t))))
+          .when(visible && p.windows.length > 0, el => el.child(h_flex().pl(10).pb(6).gap(6).items_center().flex_wrap()
+            .child(label("Limits", 11, t.muted).w(56).flex_none()
+              .tooltip("Which limits show, in the status bar, the dashboard and pane headers."))
+            .children(limits.items.map(w =>
             this.chip(`window-${w.key}`, shortLabel(w, p.windows), shows(w, o), () => {
               const current = this.opts();
               set({ windows: { ...current.windows, [w.key]: !shows(w, current) } });

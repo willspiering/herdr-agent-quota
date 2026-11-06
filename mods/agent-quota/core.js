@@ -13,7 +13,9 @@ export const CADENCE = {
 };
 export const STALE_MS = 900000;
 export const DEFAULTS = {
-  hidden: [], kinds: { session: true, weekly: true, monthly: true, model: false, credits: true, unknown: true },
+  // `hidden`: off everywhere. `offStrip`: off the status bar only, still in the dashboard and
+  // its pane headers, for an agent used now and then or a crowded bar.
+  hidden: [], offStrip: [], kinds: { session: true, weekly: true, monthly: true, model: false, credits: true, unknown: true },
   windows: {}, signedOut: false, names: true, activeFirst: true,
   favorites: ["codex", "claude", "grok"], redline: 70,
   strip: "meter", dash: "bars", metric: "used", palette: "terminal",
@@ -36,6 +38,7 @@ export function options(start = {}, saved = {}) {
   const o = { ...DEFAULTS, ...start, ...saved };
   return { ...o,
     hidden: Array.isArray(o.hidden) ? o.hidden.filter(x => typeof x === "string") : [],
+    offStrip: Array.isArray(o.offStrip) ? o.offStrip.filter(x => typeof x === "string") : [],
     favorites: Array.isArray(o.favorites) ? o.favorites.filter(x => typeof x === "string") : DEFAULTS.favorites,
     kinds: { ...DEFAULTS.kinds, ...start.kinds, ...saved.kinds },
     windows: Object.fromEntries(Object.entries({ ...start.windows, ...saved.windows }).filter(([, v]) => typeof v === "boolean")),

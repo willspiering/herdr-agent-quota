@@ -332,3 +332,37 @@ test("the command loop yields to Herdr and stops when commands end", async () =>
   retired.cx.phase = () => { throw new Error("view released"); };
   await assert.rejects(retired.tasks[1](retired.cx), /released/);
 });
+test("a provider can leave the status bar and stay in the dashboard and its pane headers", async () => {
+  const host = await createHost({ data });
+  host.view.page = "configure";
+  click(host, `strip-${data.providers[0].key}`);
+  assert.deepEqual(host.state[`${PREFIX}.options`].offStrip, ["codex"]);
+  assert.match(flatten(host.tree()), /not in the status bar/);
+  host.view.page = "overview";
+  assert.match(flatten(host.tree()), /78%/);
+  const strip = await createHost({ mode: "strip", sharedState: { ...host.state } });
+  assert.doesNotMatch(flatten(strip.tree()), /78%/);
+  const header = await createHost({ mode: "header", sharedState: { ...host.state }, runtime: { pane: "p1" }, paneList: [{ pane: "p1", terminal: "t1", program: { key: "codex", name: "Codex", agent: true } }] });
+  assert.match(flatten(header.tree()), /78%/);
+  // And back on.
+  host.view.page = "configure";
+  click(host, `strip-${data.providers[0].key}`);
+  assert.deepEqual(host.state[`${PREFIX}.options`].offStrip, []);
+});
+test("a pane header with no reading for its agent shows no figure at all", async () => {
+  for (const reading of [null, parseReport(JSON.stringify({ schemaVersion: 5, generatedAt: new Date(now).toISOString(), providers: [{ provider: "codex", state: { status: "auth_required" }, windows: [] }] }))]) {
+    const host = await createHost({ mode: "header", data: reading, runtime: { pane: "p1" }, paneList: [{ pane: "p1", terminal: "t1", program: { key: "codex", name: "Codex", agent: true } }] });
+    const tree = host.tree();
+    assert.ok(!ids(tree).includes("quota-for-p1"));
+    assert.doesNotMatch(flatten(tree), /quota|—|null|undefined/);
+  }
+});
+test("each provider's choices are two labeled rows: where it shows, then which limits", async () => {
+  const host = await createHost({ data });
+  host.view.page = "configure";
+  const text = flatten(host.tree());
+  assert.match(text, /Show in\s+Status bar\s+Limits\s+Session/);
+  // Hidden everywhere: neither row is offered.
+  host.state[`${PREFIX}.options`] = { hidden: ["codex"] };
+  assert.doesNotMatch(flatten(host.tree()), /Show in\s+Status bar|Limits\s+Session/);
+});

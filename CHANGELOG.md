@@ -11,6 +11,13 @@
   status mark and hover-only split right, split down, zoom and close buttons,
   at its 30px height. The mod adds only a small quota figure before the
   buttons, instead of its own Split/Zoom/Close text buttons and status word.
+- Settings · providers: a `Show in: Status bar` chip per provider takes it off
+  the status bar only, for a crowded bar or an agent used now and then. The
+  dashboard and that agent's pane headers still show it. The limit chips below
+  it are labeled `Limits`; they apply on every surface.
+- A pane header for an agent with no reading (signed out, none yet) shows no
+  figure; it used to say `quota —`, and a signed-out agent's header failed to
+  render.
 - A sign-in value that would forge an extra request header (a line break or
   other control character) is refused before anything is sent.
 
