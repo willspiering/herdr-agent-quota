@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fix: a newly shown quota column honors a Settings/provider request from the
+  last two seconds, without reopening an older target after a layout switch.
+- Fix: the pane quota figure truncates its text label inside the shrinking
+  button, preserving the start of the figure in narrow panes.
+- Hidden providers now say `Hidden · N of N limits selected` instead of
+  claiming those limits are shown.
+
 - Quota is this computer's: the dashboard lists only agents running here, its
   count covers this computer's spaces, and a pane on another machine has no
   quota button (it used to say "remote · quota not linked"). Agents on other

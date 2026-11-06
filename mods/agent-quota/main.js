@@ -89,9 +89,15 @@ export default class AgentQuota extends View {
     if (this.docked) this.mode = "dashboard";
     this.page = props()?.page === "configure" ? "configure" : "overview";
     this.selected = props()?.provider ?? null;
-    // Requests to show a provider or page reach the panel through shared state; one made before
-    // this copy started is not replayed.
-    this.viewAt = this.docked ? get("view")?.at ?? 0 : 0;
+    // The opener writes before showing the column. Honor that request when this copy starts,
+    // but don't replay an old target after a layout switch or reload.
+    const request = this.docked ? get("view") : null;
+    this.viewAt = request?.at ?? 0;
+    const requestAge = Date.now() - this.viewAt;
+    if (request && requestAge >= 0 && requestAge <= 2000) {
+      this.selected = typeof request.provider === "string" ? request.provider : null;
+      this.page = request.page === "configure" ? "configure" : "overview";
+    }
     this.drawn = false;
     this.width = this.docked ? 460 : this.mode === "dashboard" ? 850 : 600;
     // One view-owned handle, created here: the strip takes Enter/Space, the dashboard Escape.
@@ -674,7 +680,7 @@ export default class AgentQuota extends View {
         const visible = !o.hidden.includes(p.id);
         const limitId = `choices-${p.key}`, limits = this.pageItems(limitId, p.windows, LIMIT_PAGE);
         const inStrip = !o.offStrip.includes(p.id);
-        const hint = `${p.windows.length ? `${visibleWindows(p, o).length} of ${p.windows.length} limits shown` : p.status === "auth_required" ? "Sign-in needed" : "No quota reported"}${visible && !inStrip ? " · not in the status bar" : ""}`;
+        const hint = `${visible ? "" : "Hidden · "}${p.windows.length ? `${visibleWindows(p, o).length} of ${p.windows.length} limits ${visible ? "shown" : "selected"}` : p.status === "auth_required" ? "Sign-in needed" : "No quota reported"}${visible && !inStrip ? " · not in the status bar" : ""}`;
         return v_flex().gap(6)
           .child(this.switchRow(`provider-${p.key}`, `${p.label}${p.multiAccount ? ` · ${p.account}` : ""}`, hint, visible, () => {
             const hidden = this.opts().hidden;
@@ -826,7 +832,7 @@ export default class AgentQuota extends View {
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => { cx.stop_propagation(); this.open(id); })
         .tooltip(`${name} quota: ${quota}${hot ? " · over redline" : ""}. Click for details.`)
-        .child(quota)))
+        .child(div().flex_1().min_w(0).truncate().child(quota))))
       .when(Boolean(this.hovered), el => el
         .child(button("r", "split-right", "pane.split", { direction: "right", pane }))
         .child(button("d", "split-down", "pane.split", { direction: "down", pane }))

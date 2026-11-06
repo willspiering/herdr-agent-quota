@@ -38,6 +38,8 @@ agent's figure only when there's a reading (several accounts: `choose account`
 only if one has a reading) and the provider isn't hidden; otherwise none. With
 every provider off the status bar it says `quota`, and the preview says so,
 rather than waiting for agents. The Settings preview shows the bar's `+N`.
+Hidden providers omit the subordinate rows and say `Hidden · N of N limits
+selected`, so saved limit choices don't imply the provider is visible.
 
 ## How it behaves
 

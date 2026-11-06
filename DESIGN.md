@@ -139,6 +139,8 @@ It lists providers with readable limits or running sessions only.
 - **Switch row:** the whole row is one target; title, muted hint, and a
   30 × 16 track (`accent` on, `border` off) whose 12px knob slides 120ms.
 - **Chip:** 24 tall, an 8px square mark filled with `accent` when shown.
+- **Hidden provider:** subordinate placement/limit rows disappear; the summary
+  says `Hidden · N of N limits selected`, describing the saved choices.
 - **Session row:** whole-row button: status mark, status word, `space / tab`,
   `go to →`. Only this computer's agents have rows.
 - **Callouts:** redline (`▲ Over redline · …`, redline border with 10% tint)
@@ -152,7 +154,8 @@ It lists providers with readable limits or running sessions only.
   plus one quota figure before those buttons: 11px mono in `dim`, redline color
   over redline, clicking opens the dashboard. It's a native button (Tab,
   Enter/Space, accent focus border, named for screen readers), at most 200px,
-  shrinking and truncating before the stock buttons lose room; its tooltip has
+  shrinking before the stock buttons lose room, with its text label truncating
+  at the end to preserve the figure's beginning; its tooltip has
   the whole figure. None on a pane on another machine, for a provider hidden in
   Settings, or when no account has a reading.
 
