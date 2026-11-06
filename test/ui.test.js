@@ -366,3 +366,71 @@ test("each provider's choices are two labeled rows: where it shows, then which l
   host.state[`${PREFIX}.options`] = { hidden: ["codex"] };
   assert.doesNotMatch(flatten(host.tree()), /Show in\s+Status bar|Limits\s+Session/);
 });
+
+// Review fixes, local-only.
+const codexPane = { pane: "p1", terminal: "t1", program: { key: "codex", name: "Codex", agent: true } };
+const headerHost = (extra = {}) => createHost({ mode: "header", data, runtime: { pane: "p1" }, paneList: [codexPane], ...extra });
+const lanes = (...specs) => parseReport(JSON.stringify({ schemaVersion: 5, generatedAt: new Date(now).toISOString(), providers: specs.map(([account, status, used]) => ({
+  provider: "codex", accountKeys: [account], state: { status },
+  windows: used === null ? [] : [{ id: "session", label: "Session", kind: "session", percentUsed: used, resetsAt: new Date(now + 3600000).toISOString() }] })) }));
+
+test("a provider hidden everywhere has no figure in its pane header; off the status bar it keeps one", async () => {
+  const hidden = await headerHost({ sharedState: { [`${PREFIX}.data`]: data, [`${PREFIX}.options`]: { hidden: ["codex"] } } });
+  assert.ok(!ids(hidden.tree()).includes("quota-for-p1"));
+  const offStrip = await headerHost({ sharedState: { [`${PREFIX}.data`]: data, [`${PREFIX}.options`]: { offStrip: ["codex"] } } });
+  assert.match(flatten(offStrip.tree()), /78%/);
+});
+test("the header figure is a native, named, focusable button that can't crowd out the pane buttons", async () => {
+  const host = await headerHost();
+  const figure = find(host.tree(), "quota-for-p1");
+  assert.equal(figure.type, "button");
+  assert.match(figure.styles.accessibility_label[0], /^Open Codex quota: Session 78%/);
+  assert.deepEqual(figure.styles.tab_stop, [true]);
+  assert.ok(figure.styles.focus, "a visible focus treatment");
+  // Bounded and shrinking; never flex_none.
+  assert.ok(figure.styles.max_w && figure.styles.truncate && figure.styles.min_w);
+  assert.deepEqual(figure.styles.flex_shrink, [1]); assert.equal(figure.styles.flex_none, undefined);
+  let stopped = false;
+  figure.events.click({}, { stop_propagation() { stopped = true; } });
+  assert.ok(stopped, "clicking the figure doesn't also focus the pane");
+});
+test("a header never shows another machine's lane, even before the strip drops it", async () => {
+  const there = { ...data.providers[0], key: JSON.stringify(["codex", "codex-home", "box"]), machine: "box" };
+  const host = await headerHost({ sharedState: { [`${PREFIX}.data`]: { ...data, providers: [...data.providers, there] } } });
+  const text = flatten(host.tree());
+  assert.match(text, /78%/); assert.doesNotMatch(text, /choose account/);
+});
+test("several accounts are offered in a header only when one has a reading", async () => {
+  const none = await headerHost({ sharedState: { [`${PREFIX}.data`]: lanes(["a", "auth_required", null], ["b", "auth_required", null]) } });
+  assert.ok(!ids(none.tree()).includes("quota-for-p1"));
+  const allHidden = await headerHost({ sharedState: { [`${PREFIX}.data`]: lanes(["a", "fresh", 40], ["b", "fresh", 50]), [`${PREFIX}.options`]: { kinds: { session: false } } } });
+  assert.ok(!ids(allHidden.tree()).includes("quota-for-p1"));
+  const one = await headerHost({ sharedState: { [`${PREFIX}.data`]: lanes(["a", "fresh", 40], ["b", "auth_required", null]) } });
+  assert.match(flatten(one.tree()), /choose account/);
+});
+test("with every provider off the status bar, the bar and its preview say so instead of waiting", async () => {
+  const state = { [`${PREFIX}.data`]: data, [`${PREFIX}.options`]: { offStrip: ["codex"] } };
+  const strip = await createHost({ mode: "strip", sharedState: { ...state } });
+  const text = flatten(strip.tree());
+  assert.match(text, /quota/); assert.doesNotMatch(text, /waiting for agents|78%/);
+  const settings = await createHost({ sharedState: { ...state } });
+  settings.view.page = "configure";
+  assert.match(flatten(settings.tree()), /No providers in the status bar/);
+});
+test("the Settings preview shows the status bar's overflow count", async () => {
+  const many = parseReport(JSON.stringify({ schemaVersion: 5, generatedAt: new Date(now).toISOString(), providers: ["codex", "claude", "grok", "cursor", "kimi", "copilot", "opencode-go", "agy"].map(provider => ({
+    provider, state: { status: "fresh" }, windows: ["a", "b"].map(id => ({ id, label: `${id} window`, kind: "session", percentUsed: 10, resetsAt: new Date(now + 3600000).toISOString() })) })) }));
+  const host = await createHost({ data: many });
+  host.view.page = "configure";
+  const text = flatten(host.tree()); // also sets the frame stripItems reads
+  const preview = host.view.stripItems(host.view.width - 2 * host.view.pad());
+  assert.ok(preview.hidden > 0);
+  assert.match(text, new RegExp(`\\+${preview.hidden}\\b`));
+});
+test("each Settings chip is named with its provider for screen readers", async () => {
+  const host = await createHost({ data });
+  host.view.page = "configure";
+  const tree = host.tree();
+  assert.equal(find(tree, `strip-${data.providers[0].key}`).styles.accessibility_label[0], "Codex in the status bar: shown");
+  assert.match(find(tree, `window-${data.providers[0].windows[0].key}`).styles.accessibility_label[0], /^Codex .+ limit: shown$/);
+});

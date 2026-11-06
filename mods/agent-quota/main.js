@@ -152,7 +152,8 @@ export default class AgentQuota extends View {
       // only deserialize quota again when a collection starts/completes or the program changes.
       const c = get("control"), revision = `${id}/${c?.attempt ?? 0}/${c?.token ?? ""}`;
       if (this.headerRevision !== revision) {
-        this.headerReport = { providers: (get("data")?.providers ?? []).filter(p => p.id === id) };
+        // Never another machine's lane, even one the strip hasn't dropped yet (see init).
+        this.headerReport = { providers: (get("data")?.providers ?? []).filter(p => p.id === id && !p.machine) };
         this.headerRevision = revision;
       }
       report = this.headerReport;
@@ -390,9 +391,9 @@ export default class AgentQuota extends View {
       }));
   }
 
-  chip(id, text, on, action, t) {
+  chip(id, text, on, action, t, name = text) {
     return Button.new(id).flex().h(24).px(8).gap(6).items_center().rounded(4).flex_none()
-      .role("button").accessibility_label(`${text}: ${on ? "shown" : "hidden"}`).selected(on).tab_stop(true).tab_index(0)
+      .role("button").accessibility_label(`${name}: ${on ? "shown" : "hidden"}`).selected(on).tab_stop(true).tab_index(0)
       .border(1).border_color(on ? t.input : t.border).bg(on ? t.selected : t.popover)
       .text_size(11).text_color(on ? t.foreground : t.muted)
       .focus(s => s.border_color(t.accent)).cursor_pointer().hover(s => s.bg(t.hover))
@@ -526,11 +527,13 @@ export default class AgentQuota extends View {
         .when(!ws.length, el => el.child(label("—", 11, t.muted)))
         .children(ws.map(w => this.stripWindow(w, p)));
     });
-    return { items, hidden: candidates.length - fits.length, stale: fits.some(this.f.stale) };
+    // Taken off the status bar on purpose (Settings), not waiting for anything.
+    const chosen = !candidates.length && shown.some(p => o.offStrip.includes(p.id));
+    return { items, hidden: candidates.length - fits.length, stale: fits.some(this.f.stale), chosen };
   }
 
   strip() {
-    const { t, failed } = this.f, { items, hidden, stale } = this.stripItems(this.width);
+    const { t, failed } = this.f, { items, hidden, stale, chosen } = this.stripItems(this.width);
     return h_flex().id("agent-quota-strip").size_full().px(12).gap(14).items_center().justify_end().overflow_hidden()
       .font_family(this.f.mono)
       .on_size_change((s, cx) => this.resized(s, cx))
@@ -542,7 +545,7 @@ export default class AgentQuota extends View {
       .tooltip("Agent quota · click for details")
       .on_click(() => this.open(null, "overview", true)).on_mouse_down("right", () => this.open(null, "overview", true))
       .on_key_down(e => { if (e.key === "enter" || e.key === "space") this.open(null, "overview", true); })
-      .when(!items.length, el => el.child(label(failed ? "quota · needs attention" : "quota · waiting for agents", 11, t.muted)))
+      .when(!items.length, el => el.child(label(failed ? "quota · needs attention" : chosen ? "quota" : "quota · waiting for agents", 11, t.muted)))
       .children(items)
       .when(hidden > 0, el => el.child(label(`+${hidden}`, 11, t.muted)))
       .when(stale, el => el.child(label("stale", 10, t.warning)));
@@ -649,7 +652,8 @@ export default class AgentQuota extends View {
       .child(this.section("── status bar", t))
       .child(h_flex().h(30).mx(10).mb(6).px(12).gap(14).items_center().justify_end().overflow_hidden().rounded(4)
         .bg(t.chrome).border(1).border_color(t.border)
-        .children(preview.items.length ? preview.items : [label("Nothing to show yet", 11, t.muted)]))
+        .children(preview.items.length ? preview.items : [label(preview.chosen ? "No providers in the status bar" : "Nothing to show yet", 11, t.muted)])
+        .when(preview.hidden > 0, el => el.child(label(`+${preview.hidden}`, 11, t.muted))))
       .child(this.setting("Style", "How each limit looks at the bottom of the window.",
         this.segmented("strip-style", [["meter", "Meter"], ["blocks", "Blocks"], ["numbers", "Numbers"]], o.strip, v => set({ strip: v }), t), t))
       .child(this.setting("Show", "Count what you've used, or what you have left.",
@@ -684,7 +688,7 @@ export default class AgentQuota extends View {
             .child(this.chip(`strip-${p.key}`, "Status bar", inStrip, () => {
               const off = this.opts().offStrip;
               set({ offStrip: off.includes(p.id) ? off.filter(id => id !== p.id) : [...off, p.id] });
-            }, t))))
+            }, t, `${p.label} in the status bar`))))
           .when(visible && p.windows.length > 0, el => el.child(h_flex().pl(10).pb(6).gap(6).items_center().flex_wrap()
             .child(label("Limits", 11, t.muted).w(56).flex_none()
               .tooltip("Which limits show, in the status bar, the dashboard and pane headers."))
@@ -692,7 +696,7 @@ export default class AgentQuota extends View {
             this.chip(`window-${w.key}`, shortLabel(w, p.windows), shows(w, o), () => {
               const current = this.opts();
               set({ windows: { ...current.windows, [w.key]: !shows(w, current) } });
-            }, t)))).children(this.pager(limitId, limits, t)));
+            }, t, `${p.label} ${shortLabel(w, p.windows)} limit`)))).children(this.pager(limitId, limits, t)));
       }))
       .children(this.pager("configure-providers", providerPage, t))
       .child(this.section("── about this data", t))
@@ -786,10 +790,12 @@ export default class AgentQuota extends View {
     // A terminal on another machine spends that machine's sign-in, which this computer doesn't
     // read: no figure there.
     const remote = Boolean(p.terminal?.includes("/"));
-    const lanes = this.f.all.filter(a => a.id === id);
+    // Hidden everywhere means here too; the status bar choice doesn't apply to headers.
+    const lanes = o.hidden.includes(id) ? [] : this.f.all.filter(a => a.id === id);
     const single = lanes.length === 1 ? lanes[0] : null;
     const ws = single ? visibleWindows(single, o).slice(0, 2) : [];
-    const quota = lanes.length > 1 ? "choose account"
+    // No reading, no figure: several accounts are offered only when one of them has something.
+    const quota = lanes.length > 1 ? (lanes.some(l => visibleWindows(l, o).length) ? "choose account" : null)
       : ws.length ? `${ws.map(w => `${shortLabel(w, single.windows)} ${this.value(w, this.state(w, single))}`).join(" · ")}${o.metric === "left" ? " left" : ""}` : null;
     const hot = ws.some(w => this.state(w, single) === "fresh" && w.percentUsed >= o.redline);
     const button = (key, file, command, args) => div().id(`ph-${key}-${pane}`).p(3).rounded(4).text_color(t.dim)
@@ -807,11 +813,19 @@ export default class AgentQuota extends View {
       .when(st === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
       .when(st === "blocked", el => el.child(div().flex_none().px(6).h(18).flex().items_center().rounded(5).bg(/** @type {any} */ (t.blocked + "26")).text_size(10.5).font_semibold().text_color(t.blocked).child("Needs you")))
       .when(st === "done", el => el.child(div().size(7).flex_none().rounded(4).bg(t.done)))
-      .when(p.program?.agent === true && !remote && Boolean(quota), el => el.child(div().id(`quota-for-${pane}`).flex_none().px(4).py(1).rounded(4)
+      // A native button, so it takes Tab, Enter and Space and is named for screen readers; it
+      // looks like quiet text. Bounded and shrinking, so the stock buttons always keep their room
+      // in a narrow pane; the tooltip has the whole figure.
+      .when(p.program?.agent === true && !remote && Boolean(quota), el => el.child(Button.new(`quota-for-${pane}`)
+        .role("button").accessibility_label(`Open ${name} quota${quota === "choose account" ? "" : `: ${quota}`}${hot ? ", over redline" : ""}`)
+        .tab_stop(true).tab_index(0)
+        .flex_shrink(1).min_w(0).max_w(200).truncate().px(4).py(1).rounded(4)
+        .border(1).border_color(t.background).focus(s => s.border_color(t.accent))
         .font_family(this.f.mono).text_size(11).text_color(/** @type {any} */ (hot ? this.f.t.redline : t.dim))
-        .hover(s => s.bg(t.hover).text_color(t.foreground))
+        .cursor_pointer().hover(s => s.bg(t.hover).text_color(t.foreground))
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => { cx.stop_propagation(); this.open(id); })
-        .tooltip(`${name} quota${hot ? " · over redline" : ""}. Click for details.`)
+        .tooltip(`${name} quota: ${quota}${hot ? " · over redline" : ""}. Click for details.`)
         .child(quota)))
       .when(Boolean(this.hovered), el => el
         .child(button("r", "split-right", "pane.split", { direction: "right", pane }))

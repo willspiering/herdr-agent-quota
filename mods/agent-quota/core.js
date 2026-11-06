@@ -178,7 +178,8 @@ export function localAgents(live, spaces) {
   return live.filter(a => !a.address?.includes("/") && !elsewhere.has(a.space));
 }
 
-export function catalog(report, discovered, live, spaces, o) {
+// `live`: this computer's agents (localAgents), filtered once by the caller.
+export function catalog(report, discovered, live, _spaces, o) {
   const list = (report?.providers ?? []).map(p => ({ ...p, installed: false, sessions: [] }));
   const byId = new Map();
   const activity = new Map();
@@ -195,7 +196,7 @@ export function catalog(report, discovered, live, spaces, o) {
     const id = providerId(a.key);
     for (const p of ensure(id, a.name || id)) { p.installed = true; p.program = a; }
   }
-  for (const a of localAgents(live, spaces)) {
+  for (const a of live) {
     const id = activeProvider(a);
     if (!id) continue;
     if (!activity.has(id)) activity.set(id, { sessions: [], program: a.program, urgency: 0 });

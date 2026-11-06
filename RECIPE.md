@@ -34,7 +34,10 @@ Settings: `── status bar` (live strip preview, Style, Show, names switch),
 labeled rows: `Show in` with a `Status bar` chip that takes it off the status
 bar only, keeping it in the dashboard and pane headers, and `Limits`, chips
 for which of its limits show on every surface), `── about this data`. A pane header shows its
-agent's figure only when there's a reading; otherwise it shows none.
+agent's figure only when there's a reading (several accounts: `choose account`
+only if one has a reading) and the provider isn't hidden; otherwise none. With
+every provider off the status bar it says `quota`, and the preview says so,
+rather than waiting for agents. The Settings preview shows the bar's `+N`.
 
 ## How it behaves
 
@@ -59,7 +62,8 @@ which covers the terminals, closes). Under 600px the legend gets its own row.
 One mod, `mods/agent-quota`, with `place: none`. The same View renders strip,
 dashboard or optional header using `props().mode`. The optional header is
 Herdr's shipped `pane` header redrawn as is (its SVGs, sizes, theme colors,
-hover-only buttons, layout height 30) with one quota figure before the buttons. Use Herdr's `knownAgents`,
+hover-only buttons, layout height 30; setup moves this mod's earlier default
+of 34 to 30 and keeps any other height) with one quota figure before the buttons. Use Herdr's `knownAgents`,
 `agents`, `spaces` and `panes`; never scrape terminals. `core.js` handles
 quota schema 3–5, account lanes, visibility, activity ranking and freshness.
 `collector.js` reads every provider natively: one adapter per provider in

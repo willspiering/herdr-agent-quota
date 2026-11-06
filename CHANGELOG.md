@@ -9,15 +9,20 @@
   left by a build that read other machines are dropped once.
 - Pane headers (`setup:headers`) are Herdr's own header again: its icons,
   status mark and hover-only split right, split down, zoom and close buttons,
-  at its 30px height. The mod adds only a small quota figure before the
-  buttons, instead of its own Split/Zoom/Close text buttons and status word.
+  at its 30px height (setup moves the earlier 34 to 30). The mod adds only a
+  small quota figure before the buttons, instead of its own Split/Zoom/Close
+  text buttons and status word. The figure takes Tab and Enter/Space, is named
+  for screen readers, truncates in a narrow pane, and isn't shown for a
+  provider hidden in Settings.
 - Settings · providers: a `Show in: Status bar` chip per provider takes it off
   the status bar only, for a crowded bar or an agent used now and then. The
   dashboard and that agent's pane headers still show it. The limit chips below
   it are labeled `Limits`; they apply on every surface.
 - A pane header for an agent with no reading (signed out, none yet) shows no
-  figure; it used to say `quota —`, and a signed-out agent's header failed to
-  render.
+  figure, including several accounts with none; it used to say `quota —` or
+  `choose account`, and a signed-out agent's header failed to render.
+- With every provider off the status bar, it says `quota` instead of
+  `quota · waiting for agents`; the Settings preview shows the bar's `+N`.
 - A sign-in value that would forge an extra request header (a line break or
   other control character) is refused before anything is sent.
 

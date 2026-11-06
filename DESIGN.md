@@ -150,7 +150,11 @@ It lists providers with readable limits or running sessions only.
 - **Pane header:** Herdr's own `pane` header, drawn the same way (icon, name,
   folder, status mark, and split right/split down/zoom/close icons on hover),
   plus one quota figure before those buttons: 11px mono in `dim`, redline color
-  over redline, clicking opens the dashboard. None on a pane on another machine.
+  over redline, clicking opens the dashboard. It's a native button (Tab,
+  Enter/Space, accent focus border, named for screen readers), at most 200px,
+  shrinking and truncating before the stock buttons lose room; its tooltip has
+  the whole figure. None on a pane on another machine, for a provider hidden in
+  Settings, or when no account has a reading.
 
 ## Do's and Don'ts
 

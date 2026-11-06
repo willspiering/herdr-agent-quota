@@ -81,7 +81,8 @@ test("running and focused agents rise ahead of favorite order", () => {
   assert.equal(list[0].sessions.length, 1);
 });
 test("unknown installed agents stay visible; agents on other machines aren't this computer's", () => {
-  const list = catalog(null, [{ key: "opencode", installed: true, name: "OpenCode" }], [{ address: "server/t1", space: "server/s1", program: { key: "grok" }, status: "idle" }], [{ id: "server/s1", machine: "server" }], opts);
+  const everywhere = [{ address: "server/t1", space: "server/s1", program: { key: "grok" }, status: "idle" }], places = [{ id: "server/s1", machine: "server" }];
+  const list = catalog(null, [{ key: "opencode", installed: true, name: "OpenCode" }], localAgents(everywhere, places), places, opts);
   assert.equal(list.find(p => p.id === "grok"), undefined);
   assert.equal(list.find(p => p.id === "opencode").windows.length, 0);
   // By address, or by a space Herdr says is on another machine.
@@ -254,4 +255,15 @@ test("readings and stale flags for providers no adapter reads are forgotten", ()
   assert.equal(out.error, null);
   assert.deepEqual(forgetUnreadable(data, { message: "m", providers: null }, new Set(["codex"])).error, { message: "m", providers: null });
   assert.deepEqual(forgetUnreadable(null, null, new Set()), { data: null, error: null });
+});
+
+test("pane headers take Herdr's 30px height; this mod's old 34 moves to 30, a person's own height stays", () => {
+  const tab = header => ({ id: "root", type: "column", children: [
+    { id: "main", type: "row", children: [{ id: "t", type: "block", content: { tab: "active", pane: header ? { header } : {} } }] },
+    { id: "status", type: "block", content: { mod: "workspace-status" } }] });
+  const height = layout => { let h; JSON.stringify(layout, (k, v) => { if (v?.content?.mod === "agent-quota" && v.height) h = v.height; return v; }); return h; };
+  assert.equal(height(integrateLayout(tab(null), { headers: true })), 30);
+  assert.equal(height(integrateLayout(tab({ content: { mod: "pane" }, height: 30 }), { headers: true })), 30);
+  assert.equal(height(integrateLayout(tab({ content: { mod: "agent-quota", props: { mode: "header" } }, height: 34 }), { headers: true })), 30);
+  assert.equal(height(integrateLayout(tab({ content: { mod: "agent-quota", props: { mode: "header" } }, height: 40 }), { headers: true })), 40);
 });
