@@ -70,7 +70,7 @@ the authority for surfaces and text. This record is derived from
 - Every surface uses the terminal font (`settings().font_family`, else JetBrains Mono).
 - Usage is drawn as discrete cells, painted natively one path per color.
 - Health follows the terminal's green/yellow/red; a dim red zone shows where redline begins.
-- Unknown, stale, reset and remote states keep explicit words and a `—`.
+- Unknown, stale and reset states keep explicit words and a `—`.
 
 ## Colors
 
@@ -140,15 +140,17 @@ It lists providers with readable limits or running sessions only.
   30 × 16 track (`accent` on, `border` off) whose 12px knob slides 120ms.
 - **Chip:** 24 tall, an 8px square mark filled with `accent` when shown.
 - **Session row:** whole-row button: status mark, status word, `space / tab`,
-  `on <machine>` for remote, `go to →`.
+  `go to →`. Only this computer's agents have rows.
 - **Callouts:** redline (`▲ Over redline · …`, redline border with 10% tint)
   and collector attention (warning border). Only providers covered by the failed
   read turn stale.
 - **Refresh:** `↻ Refresh`; `Refreshing` plus a native `frames` spinner while any
   copy holds the shared claim; `Queued` (with a tooltip) when pressed inside the
   10 s cooldown.
-- **Pane header:** glyph, name, folder, status, monospace quota button and
-  small Split/Zoom/Close.
+- **Pane header:** Herdr's own `pane` header, drawn the same way (icon, name,
+  folder, status mark, and split right/split down/zoom/close icons on hover),
+  plus one quota figure before those buttons: 11px mono in `dim`, redline color
+  over redline, clicking opens the dashboard. None on a pane on another machine.
 
 ## Do's and Don'ts
 

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Quota is this computer's: the dashboard lists only agents running here, its
+  count covers this computer's spaces, and a pane on another machine has no
+  quota button (it used to say "remote · quota not linked"). Agents on other
+  machines aren't listed; install the mod there to see their quota. Readings
+  left by a build that read other machines are dropped once.
+- Pane headers (`setup:headers`) are Herdr's own header again: its icons,
+  status mark and hover-only split right, split down, zoom and close buttons,
+  at its 30px height. The mod adds only a small quota figure before the
+  buttons, instead of its own Split/Zoom/Close text buttons and status word.
+- A sign-in value that would forge an extra request header (a line break or
+  other control character) is refused before anything is sent.
+
 - Quota is read natively with Herdr's `fetch`: no Node, no npm packages and no
   background process at runtime. Each read used to start two Node processes
   (a supervisor and quota-axi) peaking around 120 MB; now a read runs in Herdr

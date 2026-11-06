@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { forgetUnreadable, parseReport, options, windowState, catalog, redlines, pace, elapsed, resetLabel, shortLabel, visibleWindows, reading, QuotaError, CADENCE, STALE_MS, schedule, needsSweep, resetDue, targets, mergeReport } from "../mods/agent-quota/core.js";
+import { forgetUnreadable, parseReport, options, windowState, catalog, redlines, pace, elapsed, resetLabel, shortLabel, visibleWindows, reading, QuotaError, CADENCE, STALE_MS, schedule, needsSweep, resetDue, targets, mergeReport, localAgents, failure } from "../mods/agent-quota/core.js";
 import { collect } from "../mods/agent-quota/collector.js";
 import { integrateLayout } from "../scripts/layout.mjs";
 
@@ -80,10 +80,19 @@ test("running and focused agents rise ahead of favorite order", () => {
   assert.deepEqual(list.map(p => p.id), ["claude", "codex", "grok"]);
   assert.equal(list[0].sessions.length, 1);
 });
-test("unknown installed agents stay visible, remote activity is not local quota", () => {
+test("unknown installed agents stay visible; agents on other machines aren't this computer's", () => {
   const list = catalog(null, [{ key: "opencode", installed: true, name: "OpenCode" }], [{ address: "server/t1", space: "server/s1", program: { key: "grok" }, status: "idle" }], [{ id: "server/s1", machine: "server" }], opts);
-  assert.equal(list.find(p => p.id === "grok").remote, true);
+  assert.equal(list.find(p => p.id === "grok"), undefined);
   assert.equal(list.find(p => p.id === "opencode").windows.length, 0);
+  // By address, or by a space Herdr says is on another machine.
+  const live = [{ address: "t1", space: "a" }, { address: "box/t2", space: "box/b" }, { address: "t3", space: "c" }];
+  assert.deepEqual(localAgents(live, [{ id: "a" }, { id: "c", machine: "box" }]).map(a => a.address), ["t1"]);
+});
+test("another machine's stale flags, from the other-machines build, are not this computer's", () => {
+  assert.equal(failure({ message: "x", providers: ["codex@box"] }), null);
+  assert.deepEqual(failure({ message: "x", providers: ["codex@box", "claude"] }).providers, ["claude"]);
+  assert.deepEqual(failure({ message: "x", providers: [] }).providers, []);
+  assert.equal(failure({ message: "x" }).providers, null);
 });
 test("per-window and kind choices apply to redline summary", () => {
   const p = parse(report()).providers[0];

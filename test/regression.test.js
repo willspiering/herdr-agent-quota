@@ -138,7 +138,8 @@ test("native: every surface renders without passing null to child()", async () =
   }
   // A pane without a program name or title must not hand label() undefined.
   const header = await createHost({ mode: "header", data, runtime: { pane: "p" }, paneList: [{ pane: "p", terminal: "t1", program: { key: "codex", agent: true } }] });
-  assert.match(flatten(header.tree()), /Terminal/);
+  // Herdr's own header calls it "shell" then.
+  assert.match(flatten(header.tree()), /shell/);
 });
 
 test("native: an orphaned claim (copy stopped mid-read) is cleared once it expires", async () => {

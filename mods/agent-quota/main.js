@@ -7,7 +7,7 @@ import {
 } from "herdr";
 import {
   PREFIX, options, providerId, catalog, visibleWindows, shows, reading, windowState,
-  elapsed, pace, resetLabel, shortLabel, redlines, ageLabel, remoteAgent, QuotaError,
+  elapsed, pace, resetLabel, shortLabel, redlines, ageLabel, localAgents, forgetOtherMachines, QuotaError,
   CADENCE, schedule, needsSweep, resetDue, targets, mergeReport, failure, failureAfter, forgetUnreadable,
 } from "./core.js";
 import { collect, READ_MS } from "./collector.js";
@@ -105,7 +105,11 @@ export default class AgentQuota extends View {
     // dashboard asks it for one. The 10 s check is in-memory: it reads only when one is due.
     if (this.mode !== "header") cx.spawn(async cx => {
       cx.phase(); // End retired tasks before they read or publish state.
-      if (this.mode === "strip") this.tick(cx);
+      if (this.mode === "strip") {
+        // Left by a build that read other machines: their readings and its on/off record.
+        put("data", forgetOtherMachines(get("data") ?? null)); put("remote", null);
+        this.tick(cx);
+      }
     });
     // The window reads when it opens; the panel's opener asks the strip instead (see open()).
     if (this.mode === "dashboard" && !this.docked) this.read(cx, "look");
@@ -137,7 +141,7 @@ export default class AgentQuota extends View {
   // one copy per pane, read only their provider's limits, so they skip live agents and spaces.
   frame() {
     const o = this.opts(), header = this.mode === "header";
-    const live = header ? [] : agents(), places = header ? [] : spaces();
+    const places = header ? [] : spaces(), live = header ? [] : localAgents(agents(), places);
     if (this.mode === "strip") this.observe(Date.now(), live);
     const paneId = header ? props()?.pane : null;
     const pane = header ? panes().find(p => p.pane === paneId) : null;
@@ -205,7 +209,7 @@ export default class AgentQuota extends View {
   }
 
   // A turn has finished when an agent that was working no longer is (or has gone).
-  observe(now, live = agents()) {
+  observe(now, live = localAgents(agents(), spaces())) {
     const next = new Map(live.map(a => [a.address, a.status]));
     if (this.statuses) for (const [address, status] of this.statuses) {
       if (status === "working" && next.get(address) !== "working" && !this.finishedAt) this.finishedAt = now;
@@ -223,7 +227,7 @@ export default class AgentQuota extends View {
       const { busyUntil: _expired, token: _token, ...rest } = control;
       put("control", control = rest);
     }
-    const live = this.mode === "strip" ? this.observe(now) : agents();
+    const live = this.mode === "strip" ? this.observe(now) : localAgents(agents(), spaces());
     if (this.finishedAt && this.finishedAt <= (control?.attempt ?? 0)) this.finishedAt = 0;
     if (this.pending || control?.busyUntil > now) return;
     const reason = schedule({ now, control, hasData: Boolean(data), force, looking,
@@ -575,8 +579,6 @@ export default class AgentQuota extends View {
     const { t } = this.f;
     const id = `sessions-${p.key}`, page = this.pageItems(id, p.sessions, SESSION_PAGE);
     return v_flex().gap(1).children(page.items.map(a => {
-      const machine = this.f.spaces.find(s => s.id === a.space)?.machine;
-      const remote = remoteAgent(a, this.f.spaces);
       const where = `${a.space_name} / ${a.tab_name}`;
       return Button.new(`focus-${p.key}-${a.address}`).flex().w_full().h(26).px(8).gap(10).items_center().rounded(4)
         .role("button").accessibility_label(`Go to ${p.label} in ${where}`).tab_stop(true).tab_index(0)
@@ -587,8 +589,6 @@ export default class AgentQuota extends View {
         .child(label(STATE_MARK[a.status] ?? "·", 11, t[a.status] ?? t.muted).w(12).flex_none())
         .child(label(STATE_LABEL[a.status] ?? a.status, 11, t[a.status] ?? t.muted).w(72).flex_none())
         .child(label(where, 11, t.foreground).flex_1().min_w(0).truncate())
-        .when(remote, el => el.child(label(machine ? `on ${machine}` : "remote", 10, t.muted).flex_none()
-          .tooltip("Runs on another machine. Its quota is not linked to this computer's sign-ins.")))
         .child(label("go to →", 10, t.muted).flex_none());
     })).children(this.pager(id, page, t));
   }
@@ -599,9 +599,9 @@ export default class AgentQuota extends View {
     const working = p.sessions.filter(a => a.status === "working").length;
     const blocked = p.sessions.filter(a => a.status === "blocked").length;
     const activity = blocked ? [`▲ ${blocked} needs you`, t.blocked] : working ? [`● ${working} working`, t.working] : p.sessions.length ? [`○ ${p.sessions.length} open`, t.muted] : ["not running", t.dim ?? t.muted];
-    const status = p.remote ? "Remote activity only" : p.windows.length && (p.stale || p.status !== "fresh") ? "Stale reading · refresh to verify" : p.reused ? "Recent cached reading" : null;
+    const status = p.windows.length && (p.stale || p.status !== "fresh") ? "Stale reading · refresh to verify" : p.reused ? "Recent cached reading" : null;
     const empty = !p.windows.length
-      ? [p.status === "auth_required" ? `Sign in to ${p.label} to read its quota.` : p.remote ? "Quota for remote machines is not collected." : `${p.label} reported no quota.`, null]
+      ? [p.status === "auth_required" ? `Sign in to ${p.label} to read its quota.` : `${p.label} reported no quota.`, null]
       : !ws.length ? ["All limits are hidden.", "Choose limits"] : null;
     let body;
     if (ws.length && o.dash === "gauges") {
@@ -668,7 +668,7 @@ export default class AgentQuota extends View {
       .children(providerPage.items.map(p => {
         const visible = !o.hidden.includes(p.id);
         const limitId = `choices-${p.key}`, limits = this.pageItems(limitId, p.windows, LIMIT_PAGE);
-        const hint = p.windows.length ? `${visibleWindows(p, o).length} of ${p.windows.length} limits shown` : p.status === "auth_required" ? "Sign-in needed" : p.remote ? "Remote activity only" : "No quota reported";
+        const hint = p.windows.length ? `${visibleWindows(p, o).length} of ${p.windows.length} limits shown` : p.status === "auth_required" ? "Sign-in needed" : "No quota reported";
         return v_flex().gap(6)
           .child(this.switchRow(`provider-${p.key}`, `${p.label}${p.multiAccount ? ` · ${p.account}` : ""}`, hint, visible, () => {
             const hidden = this.opts().hidden;
@@ -698,7 +698,7 @@ export default class AgentQuota extends View {
     const lines = this.page === "overview" ? redlines(shown, o, now, this.f.stale) : [];
     // Busy is shared: another copy's read shows here too.
     const busy = this.pending || get("control")?.busyUntil > now, queued = !busy && this.queued;
-    const count = this.f.agents.length;
+    const count = this.f.agents.length, here = this.f.spaces.filter(s => !s.machine).length;
     const toSettings = (_e, cx) => { this.page = "configure"; cx.notify(); };
     const body = this.page === "configure" ? this.configure() : v_flex()
       .when(Boolean(selected), el => el.child(h_flex().pt(14).child(this.button("show-all", "← All providers", (_e, cx) => { this.selected = null; cx.notify(); }, t, { small: true }))))
@@ -720,7 +720,7 @@ export default class AgentQuota extends View {
       .child(h_flex().px(pad).pt(18).pb(12).gap(8).items_center().flex_none()
         .child(v_flex().gap(4).flex_1().min_w(0)
           .child(label("Agent quota", 17, t.foreground).font_semibold())
-          .child(label(`${count} ${count === 1 ? "agent" : "agents"} · ${this.f.spaces.length} spaces · ${ageLabel(get("data")?.at, now).toLowerCase()}`, 11, t.muted).truncate()))
+          .child(label(`${count} ${count === 1 ? "agent" : "agents"} · ${here} ${here === 1 ? "space" : "spaces"} · ${ageLabel(get("data")?.at, now).toLowerCase()}`, 11, t.muted).truncate()))
         .child(this.button("refresh", busy ? "Refreshing" : queued ? "Queued" : "↻ Refresh", (_e, cx) => this.refresh(cx), t,
           { a11y: busy ? "Refreshing quota" : queued ? "Refresh queued" : "Refresh quota" })
           .when(queued, el => el.tooltip("Read moments ago. Reading again when the 10-second cooldown ends."))
@@ -739,7 +739,7 @@ export default class AgentQuota extends View {
         .child(body))
       .child(rule(t))
       .child(h_flex().px(pad).py(10).flex_none()
-        .child(label("Quota is per account and shared across spaces · remote sessions show activity only", 10, t.muted).truncate()));
+        .child(label("Quota is per account, read from this computer's sign-ins", 10, t.muted).truncate()));
   }
 
   // Teaches the meter once: what fills, where redline starts, and what the white tick is.
@@ -756,28 +756,54 @@ export default class AgentQuota extends View {
 
   // ── pane header ──────────────────────────────────────────
 
+  // Herdr's own pane header (its shipped `pane` mod), drawn the same way with the same icons, plus
+  // one quiet quota figure before the buttons. Nothing else is added or restyled, so the mod
+  // stays out of the way: hover shows split right, split down, zoom and close, as stock does.
   header() {
-    const { o, t } = this.f;
-    const p = this.f.pane;
+    // Herdr's theme, as its own header reads it.
+    const { o } = this.f, t = /** @type {any} */ (theme()), p = this.f.pane;
     if (!p) return div();
-    const name = p.program?.name ?? p.title ?? "Terminal";
+    const pane = p.pane;
+    const name = ((p.program?.agent || p.program?.shell) && p.program.name) || p.title || p.program?.name || "shell";
+    const icon = !p.program?.icon ? null : p.program.tint ? svg(p.program.icon).size(14).flex_none().text_color(t.dim) : image(p.program.icon).w(14).h(14).flex_none();
+    const h = home(), cwd = p.cwd ?? "";
+    const folder = !cwd ? "" : cwd === h ? "~" : cwd.startsWith(h + "/") ? "~" + cwd.slice(h.length) : cwd;
     const id = providerId(p.program?.key || p.app);
+    // A terminal on another machine spends that machine's sign-in, which this computer doesn't
+    // read: no figure there.
+    const remote = Boolean(p.terminal?.includes("/"));
     const lanes = this.f.all.filter(a => a.id === id);
     const single = lanes.length === 1 ? lanes[0] : null;
     const ws = single ? visibleWindows(single, o).slice(0, 2) : [];
-    const remote = Boolean(p.terminal?.includes("/"));
-    const quota = remote ? "remote · quota not linked" : lanes.length > 1 ? "choose account"
-      : ws.length ? `${ws.map(w => `${shortLabel(w, single.windows)} ${this.value(w, this.state(w, single))}`).join(" · ")}${o.metric === "left" ? " left" : ""}` : "quota —";
-    return h_flex().id(`quota-pane-${p.pane}`).size_full().px(10).gap(8).items_center().bg(t.background).border_b(1).border_color(t.border)
-      .on_click(() => run("pane.focus", { pane: p.pane }))
-      .child(this.glyph({ id, label: name, program: p.program }, 13, t))
-      .child(label(name, 12, t.foreground).max_w(150).truncate())
-      .child(label(p.cwd ?? "", 11, t.muted).flex_1().min_w(0).truncate())
-      .when(Boolean(p.status), el => el.child(label(STATE_LABEL[p.status] ?? p.status, 11, t[p.status] ?? t.muted)))
-      .when(p.program?.agent === true, el => el.child(this.button(`quota-for-${p.pane}`, quota, () => this.open(id), t, { small: true, a11y: `Open ${p.program?.name ?? "agent"} quota` }).font_family(this.f.mono)))
-      .child(this.button(`split-${p.pane}`, "Split", () => run("pane.split", { pane: p.pane, direction: "right" }), t, { small: true }))
-      .child(this.button(`zoom-${p.pane}`, p.zoomed ? "Restore" : "Zoom", () => run("pane.zoom", { pane: p.pane }), t, { small: true }))
-      .child(this.button(`close-${p.pane}`, "Close", () => run("pane.close", { pane: p.pane }), t, { small: true }));
+    const quota = lanes.length > 1 ? "choose account"
+      : ws.length ? `${ws.map(w => `${shortLabel(w, single.windows)} ${this.value(w, this.state(w, single))}`).join(" · ")}${o.metric === "left" ? " left" : ""}` : null;
+    const hot = ws.some(w => this.state(w, single) === "fresh" && w.percentUsed >= o.redline);
+    const button = (key, file, command, args) => div().id(`ph-${key}-${pane}`).p(3).rounded(4).text_color(t.dim)
+      .hover(st => st.bg(t.hover).text_color(t.foreground))
+      .on_click((_e, cx) => { cx.stop_propagation(); run(command, args); })
+      .child(svg(`mods/pane/${file}.svg`).size(14));
+    const st = p.status;
+    return h_flex().id(`pane-head-${pane}`).size_full().px(10).gap(8).items_center()
+      .bg(t.background).border_b(1).border_color(t.border).text_size(12)
+      .on_hover((hovered, cx) => { this.hovered = hovered; cx.notify(); })
+      .on_click(() => run("pane.focus", { pane }))
+      .when(Boolean(icon), el => el.child(icon))
+      .child(div().flex_none().truncate().max_w(260).font_medium().text_color(t.foreground).child(name))
+      .child(div().flex_1().truncate().text_color(t.dim).child(folder))
+      .when(st === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
+      .when(st === "blocked", el => el.child(div().flex_none().px(6).h(18).flex().items_center().rounded(5).bg(/** @type {any} */ (t.blocked + "26")).text_size(10.5).font_semibold().text_color(t.blocked).child("Needs you")))
+      .when(st === "done", el => el.child(div().size(7).flex_none().rounded(4).bg(t.done)))
+      .when(p.program?.agent === true && !remote && Boolean(quota), el => el.child(div().id(`quota-for-${pane}`).flex_none().px(4).py(1).rounded(4)
+        .font_family(this.f.mono).text_size(11).text_color(/** @type {any} */ (hot ? this.f.t.redline : t.dim))
+        .hover(s => s.bg(t.hover).text_color(t.foreground))
+        .on_click((_e, cx) => { cx.stop_propagation(); this.open(id); })
+        .tooltip(`${name} quota${hot ? " · over redline" : ""}. Click for details.`)
+        .child(quota)))
+      .when(Boolean(this.hovered), el => el
+        .child(button("r", "split-right", "pane.split", { direction: "right", pane }))
+        .child(button("d", "split-down", "pane.split", { direction: "down", pane }))
+        .child(button("z", p.zoomed ? "unzoom" : "zoom", "pane.zoom", { pane }))
+        .child(button("x", "close", "pane.close", { pane })));
   }
 
   // A newer request from the strip or a pane header: show that provider or page.

@@ -56,8 +56,13 @@ npm run check
 npm run benchmark
 ```
 
-This is an early v1. Remote-account quota collection and absolute token counts
-are not implemented. Known issues and validation notes are in
+Quota comes from this computer's sign-ins, the ones the agents here use. Agents
+running on other machines connected to Herdr aren't listed, and their pane
+headers have no quota button: install the mod on that machine to see its quota
+there. If agents only ever sign in on a remote machine and you work on it from
+here, this computer has no quota to show for them.
+
+This is an early v1. Absolute token counts are not implemented. Known issues and validation notes are in
 [VALIDATION.md](VALIDATION.md). The performance review and remaining native
 checks are in [PERFORMANCE_REVIEW.md](PERFORMANCE_REVIEW.md).
 

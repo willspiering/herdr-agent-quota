@@ -18,7 +18,7 @@ test("dashboard renders measured meters and the redline callout", async () => {
   const host = await createHost({ data });
   const text = flatten(host.tree());
   assert.match(text, /78%/); assert.match(text, /Over redline · Codex 5h 78%|Over redline · Codex Session 78%/);
-  assert.match(text, /per account and shared across spaces/);
+  assert.match(text, /per account, read from this computer's sign-ins/);
 });
 const calls = drawn => drawn.reduce((n, p) => n + p.commands.length, 0);
 test("meters are painted as one dashed stroke per run of cells, not a shape per cell", async () => {
@@ -138,10 +138,51 @@ test("unchanged shared values are not rewritten", async () => {
   click(host, "redline-80");
   assert.equal(host.writes.filter(w => w.endsWith(".options")).length, 0);
 });
-test("pane header suppresses local readings for a remote terminal", async () => {
+test("a terminal on another machine has no quota button, and never shows this computer's reading", async () => {
   const host = await createHost({ mode: "header", data, runtime: { pane: "p1" }, paneList: [{ pane: "p1", terminal: "remote/t1", program: { key: "codex", name: "Codex", agent: true } }] });
+  const tree = host.tree(), text = flatten(tree);
+  assert.match(text, /Codex/); assert.doesNotMatch(text, /78%|quota/);
+  assert.ok(!ids(tree).some(id => id.startsWith("quota-for-")));
+  assert.ok(ids(tree).includes("pane-head-p1"));
+});
+test("the pane header is Herdr's own, with one quiet quota figure before its hover buttons", async () => {
+  const host = await createHost({ mode: "header", data, runtime: { pane: "p1" }, paneList: [{ pane: "p1", terminal: "t1", cwd: "/home/tester/work", status: "idle", program: { key: "codex", name: "Codex", agent: true } }] });
+  let tree = host.tree();
+  // At rest: name, folder and the figure; no buttons, no status word, nothing of our own.
+  assert.match(flatten(tree), /Codex.*~\/work.*78%/); assert.doesNotMatch(flatten(tree), /Split|Zoom|Close|Idle/);
+  assert.ok(!ids(tree).some(id => id.startsWith("ph-")));
+  // Hovered: Herdr's four icon buttons, after the figure, with its own icons and commands.
+  tree.styles.on_hover[0](true, { notify() {} });
+  tree = host.tree();
+  const order = ids(tree);
+  assert.deepEqual(order.filter(id => id.startsWith("ph-")), ["ph-r-p1", "ph-d-p1", "ph-z-p1", "ph-x-p1"]);
+  assert.ok(order.indexOf("quota-for-p1") < order.indexOf("ph-r-p1"));
+  const icons = []; walk(tree, n => { if (n.type === "svg") icons.push(n.value); });
+  assert.deepEqual(icons, ["mods/pane/split-right.svg", "mods/pane/split-down.svg", "mods/pane/zoom.svg", "mods/pane/close.svg"]);
+});
+const ids = tree => { const out = []; walk(tree, n => { const id = n.styles?.id?.[0]; if (typeof id === "string") out.push(id); }); return out; };
+test("the dashboard lists only this computer's agents", async () => {
+  const live = [
+    { address: "t1", space: "s1", space_name: "Here", tab_name: "1", program: { key: "codex", name: "Codex" }, status: "working" },
+    { address: "box/t2", space: "box/s2", space_name: "There", tab_name: "1", program: { key: "codex", name: "Codex" }, status: "idle" },
+    { address: "t3", space: "s3", space_name: "Mounted", tab_name: "1", program: { key: "grok", name: "Grok" }, status: "idle" },
+  ];
+  const host = await createHost({ data, live, spaceList: [{ id: "s1" }, { id: "box/s2", machine: "box" }, { id: "s3", machine: "box" }] });
   const text = flatten(host.tree());
-  assert.match(text, /remote · quota not linked/); assert.doesNotMatch(text, /78%/);
+  assert.match(text, /1 agent · 1 space/); assert.match(text, /Here \/ 1/);
+  assert.doesNotMatch(text, /There|Mounted|Grok|on box|remote/i);
+});
+test("readings and the on/off record left by the other-machines build are dropped once", async () => {
+  const there = { ...data.providers[0], key: JSON.stringify(["codex", "codex-home", "box"]), machine: "box", axi: "codex@box" };
+  const host = await createHost({ mode: "strip", sharedState: {
+    [`${PREFIX}.data`]: { ...data, providers: [...data.providers, there] },
+    [`${PREFIX}.remote`]: { v: 1, on: true, at: now },
+    [`${PREFIX}.error`]: { message: "Couldn't reach box.", providers: ["codex@box"] } } });
+  await host.tasks[0](host.cx);
+  assert.deepEqual(host.state[`${PREFIX}.data`].providers.map(p => p.key), data.providers.map(p => p.key));
+  assert.equal(host.state[`${PREFIX}.remote`] ?? null, null);
+  const dash = await createHost({ sharedState: { ...host.state, [`${PREFIX}.error`]: { message: "Couldn't reach box.", providers: ["codex@box"] } } });
+  assert.doesNotMatch(flatten(dash.tree()), /Quota needs attention|choose account/);
 });
 test("pane headers schedule nothing: no timers, no tasks, no reads", async () => {
   const runs = [];

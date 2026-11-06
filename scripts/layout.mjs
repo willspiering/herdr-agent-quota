@@ -27,7 +27,7 @@ export function integrateLayout(original, { headers = false } = {}) {
       node.content.pane ??= {};
       const header = node.content.pane.header;
       if (header && !["pane", MOD].includes(header.content?.mod)) throw new Error("Custom pane header found. Keep it and add quota manually.");
-      node.content.pane.header = { ...header, content: { mod: MOD, props: { mode: "header" } }, height: 34, position: header?.position ?? "top", reveal: header?.reveal ?? "always" };
+      node.content.pane.header = { ...header, content: { mod: MOD, props: { mode: "header" } }, height: header?.height ?? 30, position: header?.position ?? "top", reveal: header?.reveal ?? "always" };
     }
     for (const child of node.children ?? []) visit(child);
   };
