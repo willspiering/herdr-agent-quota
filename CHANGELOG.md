@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Docs: the README has a platform table (checked against the providers by a
+  test), install and update steps, troubleshooting and uninstall. AGENTS.md is
+  rewritten for any agent asked to diagnose, repair, update or extend the mod,
+  starting with how to do that without reading sign-ins.
 - Docs: `docs/adding-a-provider.md` covers connecting a Herdr agent to a
   provider, the provider contract and rules, and a tested template.
 - Internal: each provider declares the Herdr agents it covers (`agents`), its

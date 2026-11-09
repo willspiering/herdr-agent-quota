@@ -33,3 +33,13 @@ test("Herdr agents map to providers through each provider's own list", () => {
   assert.equal(Object.keys(ALIASES).length, ADAPTERS.reduce((n, a) => n + a.agents.length, 0), "no name claimed twice");
   assert.equal(providerId("some-new-agent"), "some-new-agent", "an unknown agent keeps its own id");
 });
+
+test("the README's platform table matches what each provider declares", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const readme = await readFile(new URL("../README.md", import.meta.url), "utf8");
+  const rows = new Map(readme.split("\n").filter(l => l.startsWith("| ")).map(l => l.split("|").slice(1, -1).map(c => c.trim())).map(([name, ...cells]) => [name, cells]));
+  for (const a of ADAPTERS) {
+    const want = PLATFORMS.map(system => a.platforms[system] ?? "Not supported");
+    assert.deepEqual(rows.get(a.label), want, `README row for ${a.label}: update it to match providers/${a.id}.js`);
+  }
+});
