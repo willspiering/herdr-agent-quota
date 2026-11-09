@@ -262,7 +262,13 @@ test("Refresh asks the strip, which reads every provider; no shared write to ask
   assert.equal(host.state[`${PREFIX}.control`].reason, "manual");
 });
 test("every endless loop yields to Herdr through cx, and nothing uses browser timers", async () => {
-  const source = await (await import("node:fs/promises")).readFile(new URL("../mods/agent-quota/main.js", import.meta.url), "utf8");
+  const { readFile, readdir } = await import("node:fs/promises");
+  const dir = new URL("../mods/agent-quota/", import.meta.url);
+  // The view and its scheduling: every module but the providers' parsers, whose bounded scans
+  // also use for (;;).
+  const files = (await readdir(dir, { recursive: true })).filter(f => f.endsWith(".js") && !f.startsWith("providers"));
+  assert.ok(files.includes("main.js") && files.includes("reads.js") && files.some(f => f.startsWith("ui")), "every view module");
+  const source = (await Promise.all(files.map(f => readFile(new URL(f, dir), "utf8")))).join("\n");
   assert.doesNotMatch(source, /\b(setTimeout|setInterval|while \(true\))/);
   for (const match of source.matchAll(/for \(;;\) \{/g)) {
     let depth = 0, i = match.index + match[0].length - 1;

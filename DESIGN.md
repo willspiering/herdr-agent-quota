@@ -63,7 +63,7 @@ components:
 Terminal-native instruments: monospace type, `──` section rules, segmented
 cell meters and the user's own ANSI palette. The installed Herdr theme remains
 the authority for surfaces and text. This record is derived from
-`mods/agent-quota/main.js` and `core.js`; native captures are in
+`mods/agent-quota/ui/`, `main.js` and `core.js`; native captures are in
 `VALIDATION.md`.
 
 **Key characteristics:**

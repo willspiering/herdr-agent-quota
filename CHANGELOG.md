@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Internal: main.js is split by job. state.js (shared state), reads.js (the
+  read schedule) and ui/ (parts, instruments, strip, dashboard, settings,
+  header); main.js keeps only the view's lifecycle. The test host and preview
+  load them through scripts/view-bundle.mjs. Same element trees and render
+  times as before (npm run benchmark).
 - Docs: past reviews moved to `docs/history/`.
 - Docs: the README has a platform table (checked against the providers by a
   test), install and update steps, troubleshooting and uninstall. AGENTS.md is

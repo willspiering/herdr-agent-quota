@@ -22,7 +22,15 @@ This mod reads people's sign-ins. While you work on it:
 
 ```
 mods/agent-quota/            the mod Herdr runs (QuickJS + native GPUI: no DOM, no Node APIs)
-  main.js                    the UI and read schedule: status bar, dashboard, Settings, pane header
+  main.js                    the view: one class, a copy per surface (strip, panel, dashboard, header)
+  state.js                   the shared-state keys every copy reads and writes
+  reads.js                   when and how quota is read (the schedule, the claim, the merge)
+  ui/parts.js                colors, text, controls (button, switch, chip), paging
+  ui/instruments.js          one limit drawn: value, meter, gauge, tooltip words
+  ui/strip.js                the status-bar strip
+  ui/dashboard.js            the dashboard's Overview
+  ui/settings.js             the dashboard's Settings
+  ui/header.js               the optional pane header
   core.js                    pure data: validation, freshness, account and limit identities, options
   collector.js               one read of every provider, side by side, with a deadline
   providers/index.js         the provider list and contract
@@ -32,6 +40,7 @@ mods/agent-quota/            the mod Herdr runs (QuickJS + native GPUI: no DOM, 
 scripts/install.mjs          npm run setup: copies the mod, clones the layout, binds a key
 scripts/layout.mjs           how the layout is changed (strip, dashboard column, headers)
 test/                        Node tests with a fake Herdr (test/host.js); no network
+scripts/view-bundle.mjs      joins main.js and its view modules for the tests and the preview
 docs/adding-a-provider.md    contract, rules, template and test template for a provider
 PRODUCT.md, DESIGN.md        what the mod is for, and how it looks (design tokens in DESIGN.md's header)
 RECIPE.md                    Herdr's recipe format: the brief to rebuild the mod, with the traps found
@@ -85,3 +94,7 @@ not evidence.
   natively, say so and leave it marked unverified.
 - Keep `README.md`, `RECIPE.md`, `DESIGN.md` and `CHANGELOG.md` in step with
   behavior.
+- A view module imports Herdr's APIs, core.js, collector.js and providers/ only
+  with named imports (`import { a, b } from "…"`), and exports with
+  `export function`/`export const` (one name each): the test host and preview
+  load the view through `scripts/view-bundle.mjs`, which relies on that shape.

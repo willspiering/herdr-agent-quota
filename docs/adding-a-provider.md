@@ -27,7 +27,7 @@ collector.js  collect(io)                one read, every provider side by side, 
        ├─ platform.js                    where files live and which programs run, per system
        └─ common.js                      getJson, lane, limit, ReadFailure, parsing helpers
 core.js  normalizeReport()               validates and bounds the lane before it is stored
-main.js                                  draws it: status bar, dashboard, Settings, pane header
+main.js, ui/                             draws it: status bar, dashboard, Settings, pane header
 ```
 
 A provider never touches shared state, the UI or another provider. It gets an

@@ -122,8 +122,8 @@ test("H1: setup stages the build and swaps only changed files in one step", asyn
 });
 
 test("H1: the mod needs no runtime file, and setup installs no dependencies", async () => {
-  const source = await readFile(new URL("../mods/agent-quota/main.js", import.meta.url), "utf8");
-  assert.doesNotMatch(source, /\.runtime\.json/);
+  const { bundleView } = await import("../scripts/view-bundle.mjs");
+  assert.doesNotMatch(await bundleView(), /\.runtime\.json/);
   const install = await readFile(new URL("../scripts/install.mjs", import.meta.url), "utf8");
   assert.doesNotMatch(install, /\bcp\(/, "setup must not copy files one by one into the live folder");
   assert.doesNotMatch(install, /npm(\.cmd)?["']?, \["ci"/, "setup installs nothing");
