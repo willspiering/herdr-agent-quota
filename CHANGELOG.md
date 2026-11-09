@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Internal: everything that differs between macOS, Linux and Windows (credential
+  paths, Keychain, sqlite3, ps/lsof) lives in `providers/platform.js`. Cursor on
+  Linux now also finds sqlite3 in /usr/local/bin.
 - Fix: a newly shown quota column honors a Settings/provider request from the
   last two seconds, without reopening an older target after a layout switch.
 - Fix: the pane quota figure truncates its text label inside the shrinking

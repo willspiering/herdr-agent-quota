@@ -1,6 +1,7 @@
 // Codex's ChatGPT plan limits, from the usage endpoints the Codex CLI reads.
 // Ported from quota-axi 0.1.69 providers/codex.js (MIT). Never refreshes the token.
 import { ReadFailure, obj, str, num, name as plain, clampPercent, isoTime, limit, lane, getJson, parseJson, jwtPayload } from "./common.js";
+import { homeFile } from "./platform.js";
 
 export const id = "codex";
 export const label = "Codex";
@@ -10,7 +11,7 @@ const ACCOUNT = "codex-home";
 
 async function signIn(io) {
   let text = null;
-  try { text = await io.readTextFile(`${io.home()}/.codex/auth.json`); } catch { /* absent */ }
+  try { text = await io.readTextFile(homeFile(io, ".codex/auth.json")); } catch { /* absent */ }
   const tokens = obj(parseJson(text ?? "")?.tokens);
   const token = str(tokens?.access_token) ?? str(tokens?.accessToken);
   if (!token) return null;

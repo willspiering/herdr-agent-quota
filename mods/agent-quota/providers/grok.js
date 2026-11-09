@@ -6,6 +6,7 @@
 // so the request asks for gRPC-web's text encoding (base64) and decodes it here; the protobuf
 // reading below follows quota-axi's field by field.
 import { ReadFailure, obj, str, limit, lane, hostOf, parseJson, within, REQUEST_MS } from "./common.js";
+import { homeFile } from "./platform.js";
 
 export const id = "grok";
 export const label = "Grok";
@@ -61,7 +62,7 @@ function piMs(v) {
 // { status: "missing" | "invalid" | "error" | "api_key" | "oauth" | "expired", key?, refreshable? }
 async function piSignIn(io) {
   let text;
-  try { text = await io.readTextFile(`${io.home()}/.pi/agent/auth.json`); } catch { return { status: "error" }; }
+  try { text = await io.readTextFile(homeFile(io, ".pi/agent/auth.json")); } catch { return { status: "error" }; }
   if (text === null || text === undefined) return { status: "missing" };
   if (text.length > LIMIT_BYTES) return { status: "invalid" };
   let parsed;
@@ -288,7 +289,7 @@ async function attempt(io, token, probe, now) {
 export async function read(io) {
   const now = io.now;
   let text = null;
-  try { text = await io.readTextFile(`${io.home()}/.grok/auth.json`); } catch { /* unreadable counts as absent */ }
+  try { text = await io.readTextFile(homeFile(io, ".grok/auth.json")); } catch { /* unreadable counts as absent */ }
   const cli = cliCandidates(text, now);
   const pi = await piSignIn(io);
   let anyLive = false;

@@ -2,36 +2,32 @@
 // Ported from quota-axi 0.1.69 providers/cursor.js and cursor-cli-credential.js (MIT). Never
 // refreshes a token: neither Cursor refresh token is read, and a refused token is signed out.
 import { ReadFailure, REQUEST_MS, within, hostOf, obj, str, num, name as plain, clampPercent, limit, lane, parseJson } from "./common.js";
+import { homeFile, canRun, keychain, sqlite, KEYCHAIN_MISSING } from "./platform.js";
 
 export const id = "cursor";
 export const label = "Cursor";
 const API = "https://api2.cursor.sh/aiserver.v1.DashboardService/";
 const KEYCHAIN = ["-a", "cursor-user", "-s", "cursor-access-token"];
-const SQLITE = "/usr/bin/sqlite3";
 const TOKEN_KEY = "cursorAuth/accessToken", PLAN_KEY = "cursorAuth/stripeMembershipType";
 
 // The editor keeps its sign-in in a SQLite database (state.vscdb), which only sqlite3 can open:
 // a read-only query for the token and plan, never the cached email. Without sqlite3 (Windows, a
 // Linux without it) the editor store reads as absent, and the CLI store is the only source.
-function editorDb(io) {
-  const home = io.home();
-  if (io.platform === "macos") return `${home}/Library/Application Support/Cursor/User/globalStorage/state.vscdb`;
-  if (io.platform === "linux") return `${home}/.config/Cursor/User/globalStorage/state.vscdb`;
-  return null;
-}
+const EDITOR_DB = {
+  macos: "Library/Application Support/Cursor/User/globalStorage/state.vscdb",
+  linux: ".config/Cursor/User/globalStorage/state.vscdb",
+};
 async function editorSignIn(io) {
-  const path = editorDb(io);
+  const path = homeFile(io, EDITOR_DB);
   if (!path) return { missing: true };
   let result;
   try {
-    // -init /dev/null: never run the user's ~/.sqliterc, which could redirect the token's output.
-    result = await within(io, 5000, io.exec(SQLITE, ["-readonly", "-init", "/dev/null", "-ascii", path,
-      `select key, value from ItemTable where key in ('${TOKEN_KEY}', '${PLAN_KEY}');`]));
-  } catch (error) {
+    result = await sqlite(io, 5000, ["-ascii", path, `select key, value from ItemTable where key in ('${TOKEN_KEY}', '${PLAN_KEY}');`]);
+  } catch {
     // Too slow (Cursor holding the database): a sign-in may be there, so keep the earlier reading.
-    if (error instanceof ReadFailure) return { unreadable: true };
-    return { missing: true }; // no sqlite3 to run
+    return { unreadable: true };
   }
+  if (!result) return { missing: true }; // no sqlite3 to run
   if (result?.code !== 0) {
     // A database that isn't there is a sign-out; one that won't open may still hold a sign-in.
     return /no such file|unable to open database/i.test(result?.stderr ?? "") ? { missing: true } : { unreadable: true };
@@ -56,17 +52,18 @@ function stateValue(raw) {
 // Keychain, read only when cli-config.json says the CLI is signed in. `security` is the only
 // program this runs there. With `io.keychain.allowed` false, a presence check (no -w, so no
 // prompt and no secret) tells a missing item from one that needs an approval.
+const CLI_AUTH = { linux: ".config/cursor/auth.json" };
 async function cliSignIn(io) {
-  const home = io.home();
-  if (io.platform === "linux") {
+  const file = homeFile(io, CLI_AUTH);
+  if (file) {
     let text = null;
-    try { text = await io.readTextFile(`${home}/.config/cursor/auth.json`); } catch { /* absent */ }
+    try { text = await io.readTextFile(file); } catch { /* absent */ }
     const token = str(parseJson(text ?? "")?.accessToken)?.trim();
     return token ? { token } : { missing: true };
   }
-  if (io.platform !== "macos") return { missing: true };
+  if (!canRun(io, "security")) return { missing: true };
   let config = null;
-  try { config = await io.readTextFile(`${home}/.cursor/cli-config.json`); } catch { /* absent */ }
+  try { config = await io.readTextFile(homeFile(io, ".cursor/cli-config.json")); } catch { /* absent */ }
   if (config) {
     const data = parseJson(config);
     if (!data) return { unreadable: true };
@@ -75,13 +72,13 @@ async function cliSignIn(io) {
   } else return { missing: true };
   if (io.keychain && !io.keychain.allowed) {
     let probe;
-    try { probe = await io.exec("/usr/bin/security", ["find-generic-password", ...KEYCHAIN]); } catch { probe = null; }
-    if (probe?.code === 44) return { missing: true };
+    try { probe = await keychain(io, KEYCHAIN, { secret: false }); } catch { probe = null; }
+    if (probe?.code === KEYCHAIN_MISSING) return { missing: true };
     throw new ReadFailure("keychain");
   }
   let result;
-  try { result = await io.exec("/usr/bin/security", ["find-generic-password", ...KEYCHAIN, "-w"]); } catch { throw new ReadFailure("keychain"); }
-  if (result?.code === 44) return { missing: true };
+  try { result = await keychain(io, KEYCHAIN); } catch { throw new ReadFailure("keychain"); }
+  if (result?.code === KEYCHAIN_MISSING) return { missing: true };
   if (result?.code !== 0) { if (io.keychain) io.keychain.denied = true; throw new ReadFailure("keychain"); } // denied or timed out
   if (io.keychain) io.keychain.granted = true;
   const token = String(result.stdout ?? "").trim();
@@ -183,7 +180,8 @@ export async function read(io) {
   if (editor.token) {
     const answer = await usage(io, editor, now);
     if (answer) return answer;
-    if (io.platform !== "macos" && io.platform !== "linux") return signedOut();
+    // Only where the CLI has a store this mod can read.
+    if (!homeFile(io, CLI_AUTH) && !canRun(io, "security")) return signedOut();
     const cli = await cliSignIn(io);
     if (cli.unreadable) throw new ReadFailure("unreadable");
     return cli.token ? (await usage(io, cli, now)) ?? signedOut() : signedOut();

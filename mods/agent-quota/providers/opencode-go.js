@@ -1,7 +1,8 @@
 // OpenCode Go's plan caps ($12 per rolling 5 hours, $30 per week, $60 per month), from the usage
 // endpoint OpenCode reads. Ported from quota-axi 0.1.69 providers/opencode-go.js (MIT).
 // The key is a plain API key: there is nothing to refresh.
-import { ReadFailure, obj, num, name as plain, clampPercent, limit, lane, getJson, within } from "./common.js";
+import { ReadFailure, obj, num, name as plain, clampPercent, limit, lane, getJson } from "./common.js";
+import { homeFile, sqlite } from "./platform.js";
 
 export const id = "opencode-go";
 export const label = "OpenCode Go";
@@ -14,8 +15,7 @@ const CAPS = [
   { fields: ["monthlyUsage", "monthly"], slot: "monthly", kind: "monthly" },
 ];
 // OpenCode 2.x's login lives in its SQLite database; `sqlite3 -readonly` is the only program a
-// read runs, and only here. macOS ships it; elsewhere it is looked for in the usual places.
-const SQLITE = { macos: ["/usr/bin/sqlite3"], linux: ["/usr/bin/sqlite3", "/usr/local/bin/sqlite3"] };
+// read runs, and only here (see platform.js for where it's looked for).
 const SQLITE_MS = 5000;
 const QUERY = "select 'v' || value from credential where integration_id = 'opencode-go' order by active desc, time_created desc, id desc limit 1;";
 
@@ -26,34 +26,27 @@ function literal(value) {
 }
 
 // quota-axi's data folder: XDG_DATA_HOME and LOCALAPPDATA aren't visible here, so their defaults.
-const dataDir = io => io.platform === "windows" ? `${io.home()}/AppData/Local/opencode` : `${io.home()}/.local/share/opencode`;
+const DATA = { macos: ".local/share/opencode", linux: ".local/share/opencode", windows: "AppData/Local/opencode" };
+const dataDir = io => homeFile(io, DATA);
 
 // Each source answers { status: "available", key } | { status: "missing" | "invalid" | "error" }.
 async function fromDatabase(io) {
-  const bins = SQLITE[io.platform];
-  if (!bins) return { status: "missing" };
-  const path = `${dataDir(io)}/opencode.db`;
-  for (const bin of bins) {
-    let result;
-    try { result = await within(io, SQLITE_MS, io.exec(bin, ["-readonly", "-init", "/dev/null", "-list", "-noheader", path, QUERY])); }
-    catch (error) {
-      if (error instanceof ReadFailure) return { status: "error" };
-      continue; // not installed here
-    }
-    if (result?.code !== 0) {
-      const why = String(result?.stderr ?? "");
-      // No file, or a 1.x database without the table: nothing was stored here.
-      return /no such table|unable to open database/i.test(why) ? { status: "missing" } : { status: "error" };
-    }
-    const line = String(result.stdout ?? "").replace(/\r?\n$/, "");
-    if (!line.startsWith("v")) return { status: "missing" };
-    let value;
-    try { value = JSON.parse(line.slice(1)); } catch { return { status: "invalid" }; }
-    const key = obj(value)?.type === "key" ? literal(value.key) : undefined;
-    return key ? { status: "available", key } : { status: "invalid" };
-  }
+  let result;
+  try { result = await sqlite(io, SQLITE_MS, ["-list", "-noheader", `${dataDir(io)}/opencode.db`, QUERY]); }
+  catch { return { status: "error" }; } // too slow: the database may hold a key
   // Without sqlite3 the database can't be checked; quota-axi would skip an existing one.
-  return { status: "missing" };
+  if (!result) return { status: "missing" };
+  if (result.code !== 0) {
+    const why = String(result.stderr ?? "");
+    // No file, or a 1.x database without the table: nothing was stored here.
+    return /no such table|unable to open database/i.test(why) ? { status: "missing" } : { status: "error" };
+  }
+  const line = String(result.stdout ?? "").replace(/\r?\n$/, "");
+  if (!line.startsWith("v")) return { status: "missing" };
+  let value;
+  try { value = JSON.parse(line.slice(1)); } catch { return { status: "invalid" }; }
+  const key = obj(value)?.type === "key" ? literal(value.key) : undefined;
+  return key ? { status: "available", key } : { status: "invalid" };
 }
 
 async function fromAuthFile(io) {

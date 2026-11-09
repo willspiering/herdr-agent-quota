@@ -2,6 +2,7 @@
 // Ported from quota-axi 0.1.69 providers/copilot.js and its credential readers (MIT). Never
 // refreshes or exchanges a token, and only sends one to GitHub's own API host.
 import { ReadFailure, str, num, name as plain, clampPercent, limit, lane, getJson, parseJson } from "./common.js";
+import { homeFile, canRun, keychain, KEYCHAIN_MISSING } from "./platform.js";
 
 export const id = "copilot";
 export const label = "GitHub Copilot";
@@ -51,9 +52,8 @@ function appsToken(text) {
   // A control character could not go in a header; such a token is not a credential.
   return chosen && !controls(chosen.token) ? chosen.token : undefined;
 }
-function appsPath(io) {
-  return io.platform === "windows" ? `${io.home()}/AppData/Local/github-copilot/apps.json` : `${io.home()}/.config/github-copilot/apps.json`;
-}
+const APPS = { macos: ".config/github-copilot/apps.json", linux: ".config/github-copilot/apps.json", windows: "AppData/Local/github-copilot/apps.json" };
+const appsPath = io => homeFile(io, APPS);
 
 // --- The Copilot CLI's sign-in: ~/.copilot/config.json names a macOS Keychain item ----------
 
@@ -73,10 +73,11 @@ function selectedAccount(text) {
 // The outcome: { token } | { silent: true } (this store could not have named an account) |
 // { unavailable: true } (an account is named but its secret couldn't be read) | { consent: true }.
 // The Keychain item belongs to the Copilot CLI (service copilot-cli, account `${host}:${login}`);
-// the secret is read only when `io.keychain` allows it. Windows' Credential Manager is not read.
+// the secret is read only when `io.keychain` allows it. Elsewhere the CLI's secret store (Windows'
+// Credential Manager, a Linux keyring) is not read.
 async function cliToken(io) {
-  if (io.platform !== "macos") return { silent: true };
-  const path = `${io.home()}/.copilot/config.json`;
+  if (!canRun(io, "security")) return { silent: true };
+  const path = homeFile(io, ".copilot/config.json");
   const first = await readFile(io, path);
   if (first.error) return { unavailable: true };
   if (first.text == null) return { silent: true };
@@ -84,12 +85,12 @@ async function cliToken(io) {
   if (selected.invalid) return { unavailable: true };
   if (!selected.account) return { silent: true };
   if (selected.host !== "https://github.com") return { unavailable: true };
-  const args = ["find-generic-password", "-s", SERVICE, "-a", selected.account];
+  const args = ["-s", SERVICE, "-a", selected.account];
   const allowed = !io.keychain || io.keychain.allowed;
   let result;
   // Without consent only the item's presence is checked, which never shows a prompt.
-  try { result = await io.exec("/usr/bin/security", allowed ? [...args, "-w"] : args); } catch { return { unavailable: true }; }
-  if (result?.code !== 0) { if (allowed && result?.code !== 44 && io.keychain) io.keychain.denied = true; return { unavailable: true }; }
+  try { result = await keychain(io, args, { secret: allowed }); } catch { return { unavailable: true }; }
+  if (result?.code !== 0) { if (allowed && result?.code !== KEYCHAIN_MISSING && io.keychain) io.keychain.denied = true; return { unavailable: true }; }
   if (!allowed) return { consent: true };
   const token = String(result.stdout ?? "").replace(/[\r\n]+$/, "");
   if (token.length > TOKEN_LIMIT || !/^(?:gho_|ghu_|github_pat_)[A-Za-z0-9_]+$/.test(token)) return { unavailable: true };
@@ -205,9 +206,8 @@ function ghToken(text) {
   // Only a literal secret: never a $reference or !command, never a control character.
   return token.trim() && !token.startsWith("!") && !token.includes("$") && !controls(token) ? token : undefined;
 }
-function ghPath(io) {
-  return io.platform === "windows" ? `${io.home()}/AppData/Roaming/GitHub CLI/hosts.yml` : `${io.home()}/.config/gh/hosts.yml`;
-}
+const GH_HOSTS = { macos: ".config/gh/hosts.yml", linux: ".config/gh/hosts.yml", windows: "AppData/Roaming/GitHub CLI/hosts.yml" };
+const ghPath = io => homeFile(io, GH_HOSTS);
 
 // --- The quota ------------------------------------------------------------------------------
 
