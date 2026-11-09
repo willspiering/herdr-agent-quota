@@ -318,3 +318,46 @@ difference is under the run-to-run spread). Memory is 1–2 MB higher (RSS and
 footprint), the size of the mod's copies. JavaScript is under 0.5% of the main
 thread on both. The earlier 7–13% readings in this session reflected the
 terminal workload of the session driving the test, not the mod.
+
+## Local-only build, native, 2026-11-06
+
+Herdr 0.1.13, branch `local-only`. Visual checks and the first rerun were driven
+by Codex; the header comparison by Claude. Light theme, keyboard traversal and
+the Classic palette are still to be checked by hand (`app.theme paper` reported
+success but the window stayed dark).
+
+- **Pane header:** matches Herdr's stock header (icon, name, folder, status
+  marks, 30px height, colors) at normal width, ~291px and zoom 1.2, dark theme.
+  At ~194px the figure now truncates to its start (`5h 28% ·…`).
+- **Settings:** a hidden column opened with `agent-quota.settings` shows
+  Settings first time (3 of 3; before the fix it could land on Overview).
+  `Show in` and `Limits` rows align; a hidden provider reads
+  `Hidden · N of N limits selected` with its rows omitted.
+- **Reads:** six scheduled reads, 180 s apart while an agent worked, cost
+  0.23–0.32 CPU-s each over idle (mean 0.28).
+
+### CPU and memory
+
+A first ABAB run gave quota +0.70 pp CPU and +7.75–9.44 MiB footprint, but the
+driving agent's spinner kept the window redrawing (stock at 14% CPU). Rerun with
+every agent idle and the sampler detached:
+
+| Comparison | CPU between reads | Footprint floor |
+| --- | --- | --- |
+| ABAB, stock vs quota | 2.63% vs 2.25% | — |
+| Three longer pairs, quota − stock | +0.10, +0.10, +2.33 pp | +5.44, −4.25, +19.70 MiB |
+
+The spread was wider than the gap, so headers were isolated: three rounds,
+order rotated, of stock `main`, the quota layout with Herdr's own pane header,
+and the quota layout with ours (30 s warm-up, footprint every 30 s for 180 s).
+
+| Round | Herdr's header − stock | Ours − Herdr's | Quota − stock |
+| --- | --- | --- | --- |
+| 1 | +7.47 MiB | −18.97 MiB | −11.50 MiB |
+| 2 | −0.20 MiB | −2.52 MiB | −2.72 MiB |
+| 3 | −2.41 MiB | +4.17 MiB | +1.77 MiB |
+
+Differences change sign between rounds, and stock's own floor drifted
+277 → 316 MiB over the afternoon. Settled rounds are within ~3 MiB of stock, so
+the header adds no measurable memory and the earlier +7 MiB was drift. CPU
+between reads was about 1% on all three layouts. No code change was made.

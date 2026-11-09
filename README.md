@@ -25,9 +25,7 @@ Setup binds that key only if it is free. Settings, in the same column,
 chooses the strip style (Meter, Blocks, Numbers), Used or Left, the dashboard
 layout, colors, redline, and which providers and limits show. Changes apply
 immediately with a live preview. Quota availability depends on each provider
-and your sign-in.
-Hidden providers retain their limit choices; Settings labels these as selected,
-and hides their subordinate placement and limit rows.
+and your sign-in. A hidden provider keeps its limit choices for when you show it again.
 
 Quota is read directly with Herdr's built-in `fetch`, from the same usage
 endpoints each agent's own CLI uses: Claude, Codex, GitHub Copilot, Cursor,
