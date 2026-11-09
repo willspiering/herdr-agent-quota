@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Docs: `docs/adding-a-provider.md` covers connecting a Herdr agent to a
+  provider, the provider contract and rules, and a tested template.
 - Internal: each provider declares the Herdr agents it covers (`agents`), its
   icon and where it reads a sign-in on each system (`platforms`); the alias
   map in core.js and the icon map in main.js are gone. Antigravity and OpenCode

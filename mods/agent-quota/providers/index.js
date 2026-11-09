@@ -22,5 +22,6 @@ export const ADAPTERS = [claude, codex, copilot, cursor, opencodeGo, kimi, agy, 
 
 // Herdr agent key or name (lowercase) → provider id.
 export const ALIASES = Object.fromEntries(ADAPTERS.flatMap(a => a.agents.map(name => [name, a.id])));
-// Provider id → icon.
+// Provider id → display name, and → icon.
+export const LABELS = Object.fromEntries(ADAPTERS.map(a => [a.id, a.label]));
 export const ICONS = Object.fromEntries(ADAPTERS.map(a => [a.id, a.icon]));

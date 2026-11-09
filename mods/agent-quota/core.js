@@ -1,6 +1,6 @@
 // Pure data boundary. Only these allowlisted fields reach Herdr's shared state.
 // Which Herdr agent means which provider comes from each provider's own `agents` list.
-import { ALIASES } from "./providers/index.js";
+import { ALIASES, LABELS } from "./providers/index.js";
 export const PREFIX = "agent-quota.v1";
 // When to read quota. Agents finishing a turn drive reads; timers are only a backstop.
 export const CADENCE = {
@@ -118,7 +118,7 @@ export function normalizeReport(report, now = Date.now()) {
       };
     });
     const refreshed = stamp(p.state?.refreshedAt);
-    const name = ({ codex: "Codex", claude: "Claude", grok: "Grok", cursor: "Cursor", copilot: "GitHub Copilot", kimi: "Kimi", "opencode-go": "OpenCode Go" })[id] ?? id;
+    const name = LABELS[id] ?? id;
     providers.push({ id, key, account, label: text(p.label, name), plan: text(p.plan) || null,
       status: text(p.state?.status, "unknown"), stale: p.state?.stale === true,
       at: refreshed !== null ? Math.min(refreshed, at) : at,
