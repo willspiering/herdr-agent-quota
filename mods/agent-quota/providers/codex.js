@@ -5,6 +5,10 @@ import { homeFile } from "./platform.js";
 
 export const id = "codex";
 export const label = "Codex";
+export const agents = ["openai-codex"];
+export const icon = "icons/codex.svg";
+const S = "~/.codex/auth.json";
+export const platforms = { macos: S, linux: S, windows: S };
 const ENDPOINTS = ["https://chatgpt.com/backend-api/wham/usage", "https://chatgpt.com/backend-api/codex/usage"];
 // quota-axi's key for the ~/.codex sign-in: every limit's saved-choice key includes it.
 const ACCOUNT = "codex-home";

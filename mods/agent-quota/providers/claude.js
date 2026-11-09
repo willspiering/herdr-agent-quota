@@ -6,6 +6,13 @@ import { homeFile, canRun, keychain, KEYCHAIN_MISSING } from "./platform.js";
 
 export const id = "claude";
 export const label = "Claude";
+export const agents = ["claude-code", "claude code"];
+export const icon = "icons/claude.svg";
+export const platforms = {
+  macos: "Keychain, or ~/.claude/.credentials.json",
+  linux: "~/.claude/.credentials.json",
+  windows: "~/.claude/.credentials.json",
+};
 const USAGE = "https://api.anthropic.com/api/oauth/usage";
 const HEADERS = { "anthropic-beta": "oauth-2025-04-20", "User-Agent": "claude-code/2.1.202", accept: "application/json" };
 const KEYCHAIN = "Claude Code-credentials";

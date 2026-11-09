@@ -6,6 +6,10 @@ import { homeFile } from "./platform.js";
 
 export const id = "kimi";
 export const label = "Kimi";
+export const agents = [];
+export const icon = "icons/kimi.svg";
+const S = "Kimi Code CLI (~/.kimi-code) or Pi (~/.pi/agent/auth.json)";
+export const platforms = { macos: S, linux: S, windows: S };
 const DEFAULT_BASE = "https://api.kimi.com/coding/v1";
 // Kimi Code's two deployments. A config.toml only picks one; it never supplies the host, so a
 // token is only ever sent to a Kimi host, and only to the deployment that issued it.

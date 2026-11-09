@@ -10,6 +10,10 @@ import { homeFile } from "./platform.js";
 
 export const id = "grok";
 export const label = "Grok";
+export const agents = ["grok-code"];
+export const icon = "icons/grok.svg";
+const S = "Grok CLI (~/.grok/auth.json) or Pi (~/.pi/agent/auth.json)";
+export const platforms = { macos: S, linux: S, windows: S };
 const QUOTA = "https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig";
 // Read-only model catalogs: only asked whether a token the billing call refused is still live.
 const GROK_BUILD_MODELS = "https://cli-chat-proxy.grok.com/v1/models";

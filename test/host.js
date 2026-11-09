@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as core from "../mods/agent-quota/core.js";
 import * as collector from "../mods/agent-quota/collector.js";
+import { ICONS } from "../mods/agent-quota/providers/index.js";
 
 // What Herdr's exec does at its limits (herdr.d.ts: "30 s limit, 8 MiB output"). The binary's
 // message is "<program> took longer than 30 s and was stopped".
@@ -127,7 +128,7 @@ export async function createHost({ nextCommand = () => new Promise(() => {}), mo
     layout: () => copy(layoutTree),
   };
   // Native providers are off unless a test supplies its own, and nothing reaches the network.
-  const deps = { ...constructors, ...api, ...coreModule, ...collectorModule, ADAPTERS: adapters, fetch: fetcher, home: () => "/home/tester", appWindow: () => ({ platform: "macos" }), Date: clock ? class extends Date { static now() { return clock.now; } } : Date };
+  const deps = { ...constructors, ...api, ...coreModule, ...collectorModule, ADAPTERS: adapters, ICONS, fetch: fetcher, home: () => "/home/tester", appWindow: () => ({ platform: "macos" }), Date: clock ? class extends Date { static now() { return clock.now; } } : Date };
   const code = source.replace(/import[\s\S]*?from\s+"[^";]+";/g, "").replace("export function colors", "function colors").replace("export default class AgentQuota", "class AgentQuota");
   const AgentQuota = new Function(...Object.keys(deps), `${code}\nreturn AgentQuota;`)(...Object.values(deps));
   const view = new AgentQuota(); view.init(properties, cx);

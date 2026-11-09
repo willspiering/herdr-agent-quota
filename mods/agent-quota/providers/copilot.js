@@ -6,6 +6,13 @@ import { homeFile, canRun, keychain, KEYCHAIN_MISSING } from "./platform.js";
 
 export const id = "copilot";
 export const label = "GitHub Copilot";
+export const agents = ["github-copilot"];
+export const icon = "icons/copilot.svg";
+export const platforms = {
+  macos: "Editor sign-in (apps.json), GitHub CLI (hosts.yml), Copilot CLI (Keychain)",
+  linux: "Editor sign-in (apps.json), GitHub CLI (hosts.yml)",
+  windows: "Editor sign-in (apps.json), GitHub CLI (hosts.yml)",
+};
 // quota-axi reads github.com unless QUOTA_AXI_COPILOT_HOST names a *.ghe.com host; Herdr can't
 // see that variable, so only the public host is read here.
 const USER = "https://api.github.com/copilot_internal/user";

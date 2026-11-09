@@ -11,7 +11,7 @@ import {
   CADENCE, schedule, needsSweep, resetDue, targets, mergeReport, failure, failureAfter, forgetUnreadable,
 } from "./core.js";
 import { collect, READ_MS } from "./collector.js";
-import { ADAPTERS } from "./providers/index.js";
+import { ADAPTERS, ICONS } from "./providers/index.js";
 
 const key = suffix => `${PREFIX}.${suffix}`;
 /** @returns {any} Application-owned, normalized shared state. */
@@ -28,7 +28,6 @@ const PACE_NOTE = {
   "On pace": "Using about as fast as time is passing",
 };
 const STATE_MARK = { working: "●", blocked: "▲", done: "✓", idle: "○" };
-const ICONS = { claude: "claude", codex: "codex", grok: "grok", cursor: "cursor", copilot: "copilot", kimi: "kimi" };
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 // Coordination is shared across copies/builds, not a module variable whose lifetime depends
 // on Herdr's module cache. A read can't outlive claim + READ_MS: every provider read races that
@@ -410,7 +409,7 @@ export default class AgentQuota extends View {
   }
 
   glyph(p, size, t) {
-    const icon = p.program?.icon ?? (ICONS[p.id] ? `icons/${ICONS[p.id]}.svg` : null);
+    const icon = p.program?.icon ?? ICONS[p.id] ?? null;
     if (!icon) return label(p.label.slice(0, 1).toUpperCase(), size, t.muted).w(size).flex_none();
     return p.program?.tint === false ? image(icon).size(size).flex_none() : svg(icon).size(size).flex_none().text_color(t.foreground);
   }

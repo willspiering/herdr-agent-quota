@@ -13,6 +13,13 @@ import { program, canRun } from "./platform.js";
 
 export const id = "agy";
 export const label = "Antigravity";
+export const agents = [];
+export const icon = "icons/antigravity.svg";
+export const platforms = {
+  macos: "The running app's local server (ps, lsof)",
+  linux: "The running app's local server (ps, lsof)",
+  windows: null,
+};
 const SERVICE = "/exa.language_server_pb.LanguageServerService/";
 const QUOTA_SUMMARY = `${SERVICE}RetrieveUserQuotaSummary`, USER_STATUS = `${SERVICE}GetUserStatus`;
 const MODEL_CONFIGS = `${SERVICE}GetCommandModelConfigs`, UNLEASH = `${SERVICE}GetUnleashData`;

@@ -6,6 +6,13 @@ import { homeFile, canRun, keychain, sqlite, KEYCHAIN_MISSING } from "./platform
 
 export const id = "cursor";
 export const label = "Cursor";
+export const agents = ["cursor-agent"];
+export const icon = "icons/cursor.svg";
+export const platforms = {
+  macos: "Editor database (sqlite3), Cursor CLI (Keychain)",
+  linux: "Editor database (sqlite3), Cursor CLI (~/.config/cursor/auth.json)",
+  windows: null,
+};
 const API = "https://api2.cursor.sh/aiserver.v1.DashboardService/";
 const KEYCHAIN = ["-a", "cursor-user", "-s", "cursor-access-token"];
 const TOKEN_KEY = "cursorAuth/accessToken", PLAN_KEY = "cursorAuth/stripeMembershipType";

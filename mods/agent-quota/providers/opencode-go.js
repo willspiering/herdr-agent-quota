@@ -6,6 +6,13 @@ import { homeFile, sqlite } from "./platform.js";
 
 export const id = "opencode-go";
 export const label = "OpenCode Go";
+export const agents = [];
+export const icon = "icons/opencode.svg";
+export const platforms = {
+  macos: "OpenCode database (sqlite3) or auth.json",
+  linux: "OpenCode database (sqlite3) or auth.json",
+  windows: "auth.json only",
+};
 const USAGE = "https://opencode.ai/zen/go/v1/usage";
 const FIVE_HOURS = 18000, WEEK = 604800;
 // The plan's three stacked caps: the payload fields that carry each, its slot and kind.

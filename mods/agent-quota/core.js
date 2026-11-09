@@ -1,4 +1,6 @@
 // Pure data boundary. Only these allowlisted fields reach Herdr's shared state.
+// Which Herdr agent means which provider comes from each provider's own `agents` list.
+import { ALIASES } from "./providers/index.js";
 export const PREFIX = "agent-quota.v1";
 // When to read quota. Agents finishing a turn drive reads; timers are only a backstop.
 export const CADENCE = {
@@ -32,7 +34,7 @@ const percent = v => number(v) === null || v < 0 ? null : Math.min(100, v);
 export const stamp = v => typeof v === "string" && Number.isFinite(Date.parse(v)) ? Date.parse(v) : null;
 export function providerId(value) {
   const id = text(value).toLowerCase();
-  return ({ "claude-code": "claude", "claude code": "claude", "openai-codex": "codex", "cursor-agent": "cursor", "github-copilot": "copilot", "grok-code": "grok" })[id] ?? id;
+  return ALIASES[id] ?? id;
 }
 export function options(start = {}, saved = {}) {
   const o = { ...DEFAULTS, ...start, ...saved };
