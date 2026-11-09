@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Docs: past reviews moved to `docs/history/`.
 - Docs: the README has a platform table (checked against the providers by a
   test), install and update steps, troubleshooting and uninstall. AGENTS.md is
   rewritten for any agent asked to diagnose, repair, update or extend the mod,

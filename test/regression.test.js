@@ -1,4 +1,4 @@
-// Regression tests for REVIEW-394cad9.md (F1–F4). Fake collectors only; no credentials.
+// Regression tests for docs/history/REVIEW-394cad9.md (F1–F4). Fake collectors only; no credentials.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile, readFile, rm, readdir } from "node:fs/promises";

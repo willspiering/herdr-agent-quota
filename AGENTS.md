@@ -33,9 +33,10 @@ scripts/install.mjs          npm run setup: copies the mod, clones the layout, b
 scripts/layout.mjs           how the layout is changed (strip, dashboard column, headers)
 test/                        Node tests with a fake Herdr (test/host.js); no network
 docs/adding-a-provider.md    contract, rules, template and test template for a provider
-PRODUCT.md, DESIGN.md        what the mod is for, and how it looks and behaves
-RECIPE.md                    the full behavior spec, with the traps already found
+PRODUCT.md, DESIGN.md        what the mod is for, and how it looks (design tokens in DESIGN.md's header)
+RECIPE.md                    Herdr's recipe format: the brief to rebuild the mod, with the traps found
 VALIDATION.md                native checks done so far, and known issues
+docs/history/                past reviews, kept for the record (superseded where they conflict)
 ```
 
 Herdr's own guide for mods is `~/.config/herdr-app/AGENTS.md`, with type

@@ -122,7 +122,7 @@ samples showed QuickJS JIT maintenance dominating the main thread. This suggests
 a runtime interaction; it does not establish a sole cause or rule out mod defects.
 Measure on a fresh window and compare against a matched baseline. Every `for (;;)`
 in a task must use `cx` each turn; `cx.phase()` checks lifecycle without a redraw.
-See `PERFORMANCE_REVIEW.md` for the review, regression tests and native acceptance gates.
+See `docs/history/PERFORMANCE_REVIEW.md` for the review, regression tests and native acceptance gates.
 
 `on_size_change` runs during layout; a `cx.notify()` there re-renders inside
 layout and Herdr interrupts it (`could not be re-rendered · interrupted`).
