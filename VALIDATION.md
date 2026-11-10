@@ -361,3 +361,26 @@ Differences change sign between rounds, and stock's own floor drifted
 277 → 316 MiB over the afternoon. Settled rounds are within ~3 MiB of stock, so
 the header adds no measurable memory and the earlier +7 MiB was drift. CPU
 between reads was about 1% on all three layouts. No code change was made.
+
+## Split build, native, 2026-11-10
+
+Herdr 0.1.13, branch `cleanup` at `aa84f44` (main.js split into state.js,
+reads.js and ui/), installed with only `.installation.json` differing from the
+checkout. No mod errors in `herdr-app status`.
+
+- **Drawn:** the status bar, pane headers (`5h 22% · Week 27%`), Settings, and
+  (checked by hand) the Overview page and the light theme all look right.
+- **Render:** `npm run benchmark` gives the same element counts and render times
+  as `3a25a31`, before the split.
+- **CPU and memory:** three rounds, order rotated, of stock `main` against the
+  quota layout, no agent working.
+
+| Round | Stock | Quota layout | Quota − stock floor |
+| --- | --- | --- | --- |
+| 1 | 3.27% CPU, 144.75 MiB | 1.40% CPU, 150.42 MiB | +5.67 MiB |
+| 2 | 0.69% CPU, 153.38 MiB | 1.26% CPU, 155.64 MiB | +2.26 MiB |
+| 3 | 0.96% CPU, 153.38 MiB | 2.69% CPU, 151.47 MiB | −1.91 MiB |
+
+Mean +2.0 MiB, changing sign between rounds as before; round 3's quota CPU
+includes one scheduled read. Keyboard traversal and the Classic palette are
+still to be checked by hand; Windows is untested.
