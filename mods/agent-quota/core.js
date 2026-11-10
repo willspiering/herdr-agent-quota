@@ -1,4 +1,6 @@
 // Pure data boundary. Only these allowlisted fields reach Herdr's shared state.
+// Which Herdr agent means which provider comes from each provider's own `agents` list.
+import { ALIASES, LABELS } from "./providers/index.js";
 export const PREFIX = "agent-quota.v1";
 // When to read quota. Agents finishing a turn drive reads; timers are only a backstop.
 export const CADENCE = {
@@ -13,7 +15,9 @@ export const CADENCE = {
 };
 export const STALE_MS = 900000;
 export const DEFAULTS = {
-  hidden: [], kinds: { session: true, weekly: true, monthly: true, model: false, credits: true, unknown: true },
+  // `hidden`: off everywhere. `offStrip`: off the status bar only, still in the dashboard and
+  // its pane headers, for an agent used now and then or a crowded bar.
+  hidden: [], offStrip: [], kinds: { session: true, weekly: true, monthly: true, model: false, credits: true, unknown: true },
   windows: {}, signedOut: false, names: true, activeFirst: true,
   favorites: ["codex", "claude", "grok"], redline: 70,
   strip: "meter", dash: "bars", metric: "used", palette: "terminal",
@@ -30,12 +34,13 @@ const percent = v => number(v) === null || v < 0 ? null : Math.min(100, v);
 export const stamp = v => typeof v === "string" && Number.isFinite(Date.parse(v)) ? Date.parse(v) : null;
 export function providerId(value) {
   const id = text(value).toLowerCase();
-  return ({ "claude-code": "claude", "claude code": "claude", "openai-codex": "codex", "cursor-agent": "cursor", "github-copilot": "copilot", "grok-code": "grok" })[id] ?? id;
+  return ALIASES[id] ?? id;
 }
 export function options(start = {}, saved = {}) {
   const o = { ...DEFAULTS, ...start, ...saved };
   return { ...o,
     hidden: Array.isArray(o.hidden) ? o.hidden.filter(x => typeof x === "string") : [],
+    offStrip: Array.isArray(o.offStrip) ? o.offStrip.filter(x => typeof x === "string") : [],
     favorites: Array.isArray(o.favorites) ? o.favorites.filter(x => typeof x === "string") : DEFAULTS.favorites,
     kinds: { ...DEFAULTS.kinds, ...start.kinds, ...saved.kinds },
     windows: Object.fromEntries(Object.entries({ ...start.windows, ...saved.windows }).filter(([, v]) => typeof v === "boolean")),
@@ -113,7 +118,7 @@ export function normalizeReport(report, now = Date.now()) {
       };
     });
     const refreshed = stamp(p.state?.refreshedAt);
-    const name = ({ codex: "Codex", claude: "Claude", grok: "Grok", cursor: "Cursor", copilot: "GitHub Copilot", kimi: "Kimi", "opencode-go": "OpenCode Go" })[id] ?? id;
+    const name = LABELS[id] ?? id;
     providers.push({ id, key, account, label: text(p.label, name), plan: text(p.plan) || null,
       status: text(p.state?.status, "unknown"), stale: p.state?.stale === true,
       at: refreshed !== null ? Math.min(refreshed, at) : at,
@@ -168,17 +173,22 @@ export function visibleWindows(p, o) { return p.windows.filter(w => shows(w, o))
 // The figure shown: used, or the remaining headroom. Health always follows usage.
 export function reading(w, o) { return o.metric === "left" ? 100 - w.percentUsed : w.percentUsed; }
 export function activeProvider(a) { return providerId(a.program?.key || a.app); }
-export function remoteAgent(a, spaces) { return a.address?.includes("/") || Boolean(spaces.find(s => s.id === a.space)?.machine); }
+// Quota comes from this computer's sign-ins, so only this computer's agents count: one on
+// another machine is that machine's to show, by its own copy of this mod.
+export function localAgents(live, spaces) {
+  const elsewhere = new Set(spaces.filter(s => s.machine).map(s => s.id));
+  return live.filter(a => !a.address?.includes("/") && !elsewhere.has(a.space));
+}
 
-export function catalog(report, discovered, live, spaces, o) {
-  const list = (report?.providers ?? []).map(p => ({ ...p, installed: false, sessions: [], remote: false }));
+// `live`: this computer's agents (localAgents), filtered once by the caller.
+export function catalog(report, discovered, live, _spaces, o) {
+  const list = (report?.providers ?? []).map(p => ({ ...p, installed: false, sessions: [] }));
   const byId = new Map();
-  const machines = new Map(spaces.map(s => [s.id, s.machine]));
   const activity = new Map();
   for (const p of list) { if (!byId.has(p.id)) byId.set(p.id, []); byId.get(p.id).push(p); }
   const ensure = (id, label) => {
     if (!byId.has(id)) {
-      const p = { id, key: JSON.stringify([id, "default"]), account: "default", label, windows: [], status: "unavailable", at: 0, installed: false, sessions: [], remote: false };
+      const p = { id, key: JSON.stringify([id, "default"]), account: "default", label, windows: [], status: "unavailable", at: 0, installed: false, sessions: [] };
       list.push(p); byId.set(id, [p]);
     }
     return byId.get(id);
@@ -191,22 +201,18 @@ export function catalog(report, discovered, live, spaces, o) {
   for (const a of live) {
     const id = activeProvider(a);
     if (!id) continue;
-    if (!activity.has(id)) activity.set(id, { sessions: [], local: [], remote: [], program: a.program, urgency: 0 });
+    if (!activity.has(id)) activity.set(id, { sessions: [], program: a.program, urgency: 0 });
     const group = activity.get(id);
     group.sessions.push(a);
-    (a.address?.includes("/") || machines.get(a.space) ? group.remote : group.local).push(a);
     group.urgency = Math.max(group.urgency, a.focused ? 4 : a.status === "working" ? 3 : a.status === "blocked" ? 2 : 1);
     ensure(id, a.program?.name || id);
   }
   for (const p of list) {
     const group = activity.get(p.id);
-    // The activity belongs to a provider, never a particular account. Classify once,
-    // then share read-only arrays across its lanes instead of scanning spaces per lane.
+    // The activity belongs to a provider, never a particular account: one read-only array
+    // shared across its lanes.
     p.sessions = group?.sessions ?? [];
-    p.localSessions = group?.local ?? [];
-    p.remoteSessions = group?.remote ?? [];
     p.program ??= group?.program;
-    p.remote = p.sessions.length > 0 && p.localSessions.length === 0 && !p.installed && !p.windows.length;
     p.multiAccount = (byId.get(p.id)?.length ?? 0) > 1;
   }
   const favorites = new Map();
@@ -228,7 +234,10 @@ export function redlines(list, o, now, failed = false) {
 export function failure(value) {
   if (typeof value === "string") return value ? { message: value, providers: null } : null;
   if (!value || typeof value.message !== "string" || !value.message) return null;
-  return { message: value.message, providers: Array.isArray(value.providers) ? value.providers.filter(x => typeof x === "string") : null };
+  if (!Array.isArray(value.providers)) return { message: value.message, providers: null };
+  // Ids like `claude@splinter` were other machines', from a build that read them.
+  const providers = value.providers.filter(x => typeof x === "string" && !x.includes("@"));
+  return providers.length || !value.providers.length ? { message: value.message, providers } : null;
 }
 // Which providers stay stale after a read of `ids` (null: a sweep of every provider) that failed
 // with `message`, or succeeded when message is null. `known`: the ids that currently have data.
@@ -282,6 +291,12 @@ export function forgetUnreadable(data, error, readable) {
   const providers = before?.providers ? before.providers.filter(id => readable.has(id)) : null;
   return { data: data ? { ...data, providers: data.providers.filter(keep) } : data,
     error: !before ? null : providers === null || providers.length ? { ...before, providers } : null };
+}
+// A build that read other machines stored their readings (`machine` set) beside this computer's.
+// This one reads only this computer, so they are dropped once, never shown as extra accounts.
+export function forgetOtherMachines(data) {
+  const kept = (data?.providers ?? []).filter(p => !p.machine);
+  return data && kept.length !== data.providers.length ? { ...data, providers: kept } : data;
 }
 export function mergeReport(previous, next, swept) {
   if (swept || !previous) return next;

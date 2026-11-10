@@ -111,6 +111,13 @@ test("codex reads auth.json, sends its account id and names every window like qu
   assert.equal(lane.windows[1].resetsAt, iso(now + 400000 * 1000));
   noSecrets(lane);
 });
+test("a sign-in value that would forge request headers is refused before anything is sent", async () => {
+  for (const bad of [`${TOKEN}\r\nX-Evil: 1`, `${TOKEN}\u010aX-Evil: 1`, `${TOKEN}\u2028`]) {
+    const io = fakeIo({ files: { "/Users/tester/.codex/auth.json": codexAuth({ access_token: bad }) }, routes: { [CODEX_USAGE]: [200, codexBody] } });
+    await assert.rejects(codex.read(io), e => e instanceof ReadFailure);
+    assert.equal(io.requests.length, 0);
+  }
+});
 test("codex tries the older endpoint, and is signed out only when both refuse the token", async () => {
   const files = { "/Users/tester/.codex/auth.json": codexAuth() };
   const fallback = await codex.read(fakeIo({ files, routes: { [CODEX_USAGE]: [404, {}], [CODEX_OLD]: [200, codexBody] } }));

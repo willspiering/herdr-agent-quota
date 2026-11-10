@@ -9,9 +9,17 @@
 // so a signed-out CLI can't open a sign-in browser. Herdr's exec can't set PATH or find `agy`,
 // so only the running-process read is here. With nothing running there is nothing to read.
 import { ReadFailure, obj, str, num, name as plain, clampPercent, isoTime, limit, lane, within } from "./common.js";
+import { program, canRun } from "./platform.js";
 
 export const id = "agy";
 export const label = "Antigravity";
+export const agents = [];
+export const icon = "icons/antigravity.svg";
+export const platforms = {
+  macos: "The running app's local server (ps, lsof)",
+  linux: "The running app's local server (ps, lsof)",
+  windows: null,
+};
 const SERVICE = "/exa.language_server_pb.LanguageServerService/";
 const QUOTA_SUMMARY = `${SERVICE}RetrieveUserQuotaSummary`, USER_STATUS = `${SERVICE}GetUserStatus`;
 const MODEL_CONFIGS = `${SERVICE}GetCommandModelConfigs`, UNLEASH = `${SERVICE}GetUnleashData`;
@@ -175,11 +183,11 @@ async function run(io, ms, cmd, args) {
 // The endpoints to try, in quota-axi's order: `agy` before the app, low ports first, https first.
 // null: no Antigravity process runs for this user.
 async function endpoints(io) {
-  const uid = (await run(io, PROCESS_MS, "/usr/bin/id", ["-u"])).trim();
+  const [idBin] = program(io, "id"), [ps] = program(io, "ps"), [lsof] = program(io, "lsof");
+  const uid = (await run(io, PROCESS_MS, idBin, ["-u"])).trim();
   if (!/^\d+$/.test(uid)) throw new ReadFailure("discovery");
-  const list = processes(await run(io, PROCESS_MS, "/bin/ps", [...(io.platform === "linux" ? [] : ["-x"]), "-u", uid, "-o", "pid=,command="]));
+  const list = processes(await run(io, PROCESS_MS, ps, [...(io.platform === "linux" ? [] : ["-x"]), "-u", uid, "-o", "pid=,command="]));
   if (!list.length) return null;
-  const lsof = io.platform === "linux" ? "/usr/bin/lsof" : "/usr/sbin/lsof";
   const found = [];
   let failure = null;
   // One lsof per process, side by side, so several processes don't use up the probe's budget.
@@ -264,8 +272,8 @@ async function probe(io, now) {
 
 export async function read(io) {
   const now = io.now, unavailable = () => lane(id, label, now, { status: "unavailable" });
-  // quota-axi has no process discovery on Windows.
-  if (io.platform === "windows") return unavailable();
+  // Finding the app needs id, ps and lsof (not on Windows; quota-axi has no discovery there).
+  if (!canRun(io, "id", "ps", "lsof")) return unavailable();
   let found;
   try { found = await within(io, PROBE_MS, probe(io, now)); }
   catch (error) {

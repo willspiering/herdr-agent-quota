@@ -27,10 +27,19 @@ section is a 16px glyph, 14px name, `[plan]`, a 1px rule and its activity
 (`● 2 working`, `▲ 1 needs you`). Meter rows: 72px label, a painted meter of
 5×10 cells with 2px gaps, 76px value with `used`/`left`, 130px reset, 100px
 pace. Gauges: 30 segments on a 240° arc, 140px, 24px value. Sessions are whole
-rows: mark, status, `space / tab`, `on <machine>` for remote, `go to →`.
+rows: mark, status, `space / tab`, `go to →`, for this computer's agents only.
 Settings: `── status bar` (live strip preview, Style, Show, names switch),
 `── dashboard` (Meters/Gauges, Terminal/Classic), `── redline` (60–90%),
-`── providers` (switches, per-limit chips), `── about this data`.
+`── providers` (a switch per provider hides it everywhere; under it, two
+labeled rows: `Show in` with a `Status bar` chip that takes it off the status
+bar only, keeping it in the dashboard and pane headers, and `Limits`, chips
+for which of its limits show on every surface), `── about this data`. A pane header shows its
+agent's figure only when there's a reading (several accounts: `choose account`
+only if one has a reading) and the provider isn't hidden; otherwise none. With
+every provider off the status bar it says `quota`, and the preview says so,
+rather than waiting for agents. The Settings preview shows the bar's `+N`.
+Hidden providers omit the subordinate rows and say `Hidden · N of N limits
+selected`, so saved limit choices don't imply the provider is visible.
 
 ## How it behaves
 
@@ -44,7 +53,7 @@ then other open agents; use the saved favorite order afterward. Configuration
 can hide providers, limit kinds or individual limits, toggle names and active
 ordering, and change redline to 60, 70, 80 or 90%. Save immediately in shared
 state. A click/right-click on the strip, Enter/Space on it, `cmd-shift-u` or
-`agent-quota.open` toggles the column; a pane header's quota button and
+`agent-quota.open` toggles the column; a pane header's quota figure and
 `agent-quota.settings` always show it, on that provider or on Settings. `✕` and
 Escape hide it. Opening reads quota over a minute old; closing never reads. Go
 to agent focuses its precise terminal; the column stays open (the window,
@@ -53,7 +62,10 @@ which covers the terminals, closes). Under 600px the legend gets its own row.
 ## Built from
 
 One mod, `mods/agent-quota`, with `place: none`. The same View renders strip,
-dashboard or optional header using `props().mode`. Use Herdr's `knownAgents`,
+dashboard or optional header using `props().mode`. The optional header is
+Herdr's shipped `pane` header redrawn as is (its SVGs, sizes, theme colors,
+hover-only buttons, layout height 30; setup moves this mod's earlier default
+of 34 to 30 and keeps any other height) with one quota figure before the buttons. Use Herdr's `knownAgents`,
 `agents`, `spaces` and `panes`; never scrape terminals. `core.js` handles
 quota schema 3–5, account lanes, visibility, activity ranking and freshness.
 `collector.js` reads every provider natively: one adapter per provider in
@@ -110,7 +122,7 @@ samples showed QuickJS JIT maintenance dominating the main thread. This suggests
 a runtime interaction; it does not establish a sole cause or rule out mod defects.
 Measure on a fresh window and compare against a matched baseline. Every `for (;;)`
 in a task must use `cx` each turn; `cx.phase()` checks lifecycle without a redraw.
-See `PERFORMANCE_REVIEW.md` for the review, regression tests and native acceptance gates.
+See `docs/history/PERFORMANCE_REVIEW.md` for the review, regression tests and native acceptance gates.
 
 `on_size_change` runs during layout; a `cx.notify()` there re-renders inside
 layout and Herdr interrupts it (`could not be re-rendered · interrupted`).
@@ -119,7 +131,13 @@ writes. Short limit names must stay unique per provider (Copilot has three
 monthly pools). An explicit per-limit choice overrides its kind default.
 
 Quota is per account, never per pane. Keep multiple accounts separate and
-do not infer a terminal's account. Remote activity is unlinked to local quota.
+do not infer a terminal's account. Only this computer's agents count
+(`localAgents`: not a `machine/` address, not in a space on another machine):
+they drive the dashboard's rows and counts and the read schedule, and a pane on
+another machine has no quota button. Readings, the on/off record and `@machine`
+stale flags left by the other-machines build are dropped by the strip once.
+Header values from sign-in files must be printable ASCII (`getJson`), so a
+value can't forge an extra request header.
 Unknown percentages stay unknown. A past reset suppresses the old value;
 stale values are historical and never count toward redline alerts. Used-share
 windows are not independent quota pools. Provider durations and limits vary.
@@ -193,5 +211,5 @@ they reach shared state. No inference requests.
   provider and on Settings, hides with `✕`/Escape, and closing starts no read.
 - Window dragging, keyboard focus, Escape, Settings and Go to agent work in Herdr.
 - Restarting preserves settings; multiple surfaces still share one collector.
-- Remote activity is explicitly unlinked and expired data never looks fresh.
+- Other machines' agents never appear, and expired data never looks fresh.
 - A real `preview.png` from Herdr is available before sharing publicly.

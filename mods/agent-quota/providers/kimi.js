@@ -2,9 +2,14 @@
 // Ported from quota-axi 0.1.69 providers/kimi.js, kimi-code-config.js, kimi-code-cli-credential.js
 // and pi-kimi-credential.js (MIT). Never refreshes a token: rotation stays the vendor CLI's job.
 import { ReadFailure, REQUEST_MS, within, hostOf, obj, limit, lane } from "./common.js";
+import { homeFile } from "./platform.js";
 
 export const id = "kimi";
 export const label = "Kimi";
+export const agents = [];
+export const icon = "icons/kimi.svg";
+const S = "Kimi Code CLI (~/.kimi-code) or Pi (~/.pi/agent/auth.json)";
+export const platforms = { macos: S, linux: S, windows: S };
 const DEFAULT_BASE = "https://api.kimi.com/coding/v1";
 // Kimi Code's two deployments. A config.toml only picks one; it never supplies the host, so a
 // token is only ever sent to a Kimi host, and only to the deployment that issued it.
@@ -51,7 +56,7 @@ function epochMs(v) {
   return undefined;
 }
 async function piCredential(io, now) {
-  const text = await readFile(io, `${io.home()}/.pi/agent/auth.json`);
+  const text = await readFile(io, homeFile(io, ".pi/agent/auth.json"));
   if (text === undefined) return { failure: transient("unreadable") };
   if (text === null) return { failure: AUTH };
   if (utf8Bytes(text) > CREDENTIAL_BYTES) return { failure: AUTH };
@@ -76,7 +81,7 @@ async function piCredential(io, now) {
 // The Kimi Code CLI keeps one credential per deployment; ~/.kimi-code/config.toml names the
 // current slot and deployment. Without a config file the default slot and deployment apply.
 async function cliCredential(io, now) {
-  const home = `${io.home()}/.kimi-code`;
+  const home = homeFile(io, ".kimi-code");
   const config = await readFile(io, `${home}/config.toml`);
   const env = environment(config === null ? { status: "absent" } : config === undefined || utf8Bytes(config) > CONFIG_BYTES ? { status: "unreadable" } : { status: "read", text: config });
   if (env.status !== "resolved") return { failure: transient("config") };

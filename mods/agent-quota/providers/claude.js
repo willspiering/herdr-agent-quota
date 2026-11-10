@@ -2,12 +2,21 @@
 // Ported from quota-axi 0.1.69 providers/claude.js (MIT). Never refreshes the token: Anthropic
 // rotates refresh tokens on use, so spending one here would sign the user out of Claude Code.
 import { ReadFailure, obj, str, num, name as plain, clampPercent, limit, lane, getJson, parseJson } from "./common.js";
+import { homeFile, canRun, keychain, KEYCHAIN_MISSING } from "./platform.js";
 
 export const id = "claude";
 export const label = "Claude";
+export const agents = ["claude-code", "claude code"];
+export const icon = "icons/claude.svg";
+export const platforms = {
+  macos: "Keychain, or ~/.claude/.credentials.json",
+  linux: "~/.claude/.credentials.json",
+  windows: "~/.claude/.credentials.json",
+};
 const USAGE = "https://api.anthropic.com/api/oauth/usage";
 const HEADERS = { "anthropic-beta": "oauth-2025-04-20", "User-Agent": "claude-code/2.1.202", accept: "application/json" };
 const KEYCHAIN = "Claude Code-credentials";
+const FILE = ".claude/.credentials.json";
 const FIVE_HOURS = 18000, SEVEN_DAYS = 604800;
 
 function credential(text) {
@@ -19,27 +28,27 @@ function credential(text) {
   return { token, expiresAt: Number.isFinite(at) ? at : undefined, plan: plain(oauth.subscriptionType) ?? plain(data.subscriptionType) ?? null };
 }
 
-// Claude Code keeps its sign-in in the macOS Keychain (account: the login name), elsewhere in
-// ~/.claude/.credentials.json. `security` is the only program a read runs, and only here.
+// Claude Code keeps its sign-in in ~/.claude/.credentials.json, or on macOS in the Keychain
+// (account: the login name). `security` is the only program a read runs, and only there.
 // `io.keychain.allowed` false: reading the item could raise a prompt nobody asked for, so skip it.
 async function signIn(io) {
   let text = null;
-  try { text = await io.readTextFile(`${io.home()}/.claude/.credentials.json`); } catch { /* absent */ }
+  try { text = await io.readTextFile(homeFile(io, FILE)); } catch { /* absent */ }
   const file = text ? credential(text) : null;
-  if (io.platform !== "macos" || file) return file;
+  if (file || !canRun(io, "security")) return file;
   if (io.keychain && !io.keychain.allowed) throw new ReadFailure("keychain");
   const user = io.home().split("/").filter(Boolean).pop() ?? "";
   for (const account of /^[a-zA-Z0-9._-]+$/.test(user) ? [["-a", user], []] : [[]]) {
     let result;
-    try { result = await io.exec("/usr/bin/security", ["find-generic-password", "-s", KEYCHAIN, ...account, "-w"]); } catch { break; }
+    try { result = await keychain(io, ["-s", KEYCHAIN, ...account]); } catch { break; }
     if (result?.code === 0) {
       const found = credential(result.stdout);
       if (found && io.keychain) io.keychain.granted = true;
       return found;
     }
-    // 44: no such item for this account. Anything else (refused, locked) keeps the earlier reading
+    // Missing for this account: try without one. Anything else (refused, locked) keeps the earlier reading
     // and asks for one approval, rather than showing a sign-out.
-    if (result?.code !== 44) { if (io.keychain) io.keychain.denied = true; throw new ReadFailure("keychain"); }
+    if (result?.code !== KEYCHAIN_MISSING) { if (io.keychain) io.keychain.denied = true; throw new ReadFailure("keychain"); }
   }
   return null;
 }

@@ -2,6 +2,56 @@
 
 ## Unreleased
 
+- Internal: main.js is split by job. state.js (shared state), reads.js (the
+  read schedule) and ui/ (parts, instruments, strip, dashboard, settings,
+  header); main.js keeps only the view's lifecycle. The test host and preview
+  load them through scripts/view-bundle.mjs. Same element trees and render
+  times as before (npm run benchmark).
+- Docs: past reviews moved to `docs/history/`.
+- Docs: the README has a platform table (checked against the providers by a
+  test), install and update steps, troubleshooting and uninstall. AGENTS.md is
+  rewritten for any agent asked to diagnose, repair, update or extend the mod,
+  starting with how to do that without reading sign-ins.
+- Docs: `docs/adding-a-provider.md` covers connecting a Herdr agent to a
+  provider, the provider contract and rules, and a tested template.
+- Internal: each provider declares the Herdr agents it covers (`agents`), its
+  icon and where it reads a sign-in on each system (`platforms`); the alias
+  map in core.js and the icon map in main.js are gone. Antigravity and OpenCode
+  Go now show their Herdr icons instead of a letter.
+- Internal: everything that differs between macOS, Linux and Windows (credential
+  paths, Keychain, sqlite3, ps/lsof) lives in `providers/platform.js`. Cursor on
+  Linux now also finds sqlite3 in /usr/local/bin.
+- Fix: a newly shown quota column honors a Settings/provider request from the
+  last two seconds, without reopening an older target after a layout switch.
+- Fix: the pane quota figure truncates its text label inside the shrinking
+  button, preserving the start of the figure in narrow panes.
+- Hidden providers now say `Hidden · N of N limits selected` instead of
+  claiming those limits are shown.
+
+- Quota is this computer's: the dashboard lists only agents running here, its
+  count covers this computer's spaces, and a pane on another machine has no
+  quota button (it used to say "remote · quota not linked"). Agents on other
+  machines aren't listed; install the mod there to see their quota. Readings
+  left by a build that read other machines are dropped once.
+- Pane headers (`setup:headers`) are Herdr's own header again: its icons,
+  status mark and hover-only split right, split down, zoom and close buttons,
+  at its 30px height (setup moves the earlier 34 to 30). The mod adds only a
+  small quota figure before the buttons, instead of its own Split/Zoom/Close
+  text buttons and status word. The figure takes Tab and Enter/Space, is named
+  for screen readers, truncates in a narrow pane, and isn't shown for a
+  provider hidden in Settings.
+- Settings · providers: a `Show in: Status bar` chip per provider takes it off
+  the status bar only, for a crowded bar or an agent used now and then. The
+  dashboard and that agent's pane headers still show it. The limit chips below
+  it are labeled `Limits`; they apply on every surface.
+- A pane header for an agent with no reading (signed out, none yet) shows no
+  figure, including several accounts with none; it used to say `quota —` or
+  `choose account`, and a signed-out agent's header failed to render.
+- With every provider off the status bar, it says `quota` instead of
+  `quota · waiting for agents`; the Settings preview shows the bar's `+N`.
+- A sign-in value that would forge an extra request header (a line break or
+  other control character) is refused before anything is sent.
+
 - Quota is read natively with Herdr's `fetch`: no Node, no npm packages and no
   background process at runtime. Each read used to start two Node processes
   (a supervisor and quota-axi) peaking around 120 MB; now a read runs in Herdr

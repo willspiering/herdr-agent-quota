@@ -18,7 +18,7 @@ test("dashboard renders measured meters and the redline callout", async () => {
   const host = await createHost({ data });
   const text = flatten(host.tree());
   assert.match(text, /78%/); assert.match(text, /Over redline · Codex 5h 78%|Over redline · Codex Session 78%/);
-  assert.match(text, /per account and shared across spaces/);
+  assert.match(text, /per account, read from this computer's sign-ins/);
 });
 const calls = drawn => drawn.reduce((n, p) => n + p.commands.length, 0);
 test("meters are painted as one dashed stroke per run of cells, not a shape per cell", async () => {
@@ -138,10 +138,51 @@ test("unchanged shared values are not rewritten", async () => {
   click(host, "redline-80");
   assert.equal(host.writes.filter(w => w.endsWith(".options")).length, 0);
 });
-test("pane header suppresses local readings for a remote terminal", async () => {
+test("a terminal on another machine has no quota button, and never shows this computer's reading", async () => {
   const host = await createHost({ mode: "header", data, runtime: { pane: "p1" }, paneList: [{ pane: "p1", terminal: "remote/t1", program: { key: "codex", name: "Codex", agent: true } }] });
+  const tree = host.tree(), text = flatten(tree);
+  assert.match(text, /Codex/); assert.doesNotMatch(text, /78%|quota/);
+  assert.ok(!ids(tree).some(id => id.startsWith("quota-for-")));
+  assert.ok(ids(tree).includes("pane-head-p1"));
+});
+test("the pane header is Herdr's own, with one quiet quota figure before its hover buttons", async () => {
+  const host = await createHost({ mode: "header", data, runtime: { pane: "p1" }, paneList: [{ pane: "p1", terminal: "t1", cwd: "/home/tester/work", status: "idle", program: { key: "codex", name: "Codex", agent: true } }] });
+  let tree = host.tree();
+  // At rest: name, folder and the figure; no buttons, no status word, nothing of our own.
+  assert.match(flatten(tree), /Codex.*~\/work.*78%/); assert.doesNotMatch(flatten(tree), /Split|Zoom|Close|Idle/);
+  assert.ok(!ids(tree).some(id => id.startsWith("ph-")));
+  // Hovered: Herdr's four icon buttons, after the figure, with its own icons and commands.
+  tree.styles.on_hover[0](true, { notify() {} });
+  tree = host.tree();
+  const order = ids(tree);
+  assert.deepEqual(order.filter(id => id.startsWith("ph-")), ["ph-r-p1", "ph-d-p1", "ph-z-p1", "ph-x-p1"]);
+  assert.ok(order.indexOf("quota-for-p1") < order.indexOf("ph-r-p1"));
+  const icons = []; walk(tree, n => { if (n.type === "svg") icons.push(n.value); });
+  assert.deepEqual(icons, ["mods/pane/split-right.svg", "mods/pane/split-down.svg", "mods/pane/zoom.svg", "mods/pane/close.svg"]);
+});
+const ids = tree => { const out = []; walk(tree, n => { const id = n.styles?.id?.[0]; if (typeof id === "string") out.push(id); }); return out; };
+test("the dashboard lists only this computer's agents", async () => {
+  const live = [
+    { address: "t1", space: "s1", space_name: "Here", tab_name: "1", program: { key: "codex", name: "Codex" }, status: "working" },
+    { address: "box/t2", space: "box/s2", space_name: "There", tab_name: "1", program: { key: "codex", name: "Codex" }, status: "idle" },
+    { address: "t3", space: "s3", space_name: "Mounted", tab_name: "1", program: { key: "grok", name: "Grok" }, status: "idle" },
+  ];
+  const host = await createHost({ data, live, spaceList: [{ id: "s1" }, { id: "box/s2", machine: "box" }, { id: "s3", machine: "box" }] });
   const text = flatten(host.tree());
-  assert.match(text, /remote · quota not linked/); assert.doesNotMatch(text, /78%/);
+  assert.match(text, /1 agent · 1 space/); assert.match(text, /Here \/ 1/);
+  assert.doesNotMatch(text, /There|Mounted|Grok|on box|remote/i);
+});
+test("readings and the on/off record left by the other-machines build are dropped once", async () => {
+  const there = { ...data.providers[0], key: JSON.stringify(["codex", "codex-home", "box"]), machine: "box", axi: "codex@box" };
+  const host = await createHost({ mode: "strip", sharedState: {
+    [`${PREFIX}.data`]: { ...data, providers: [...data.providers, there] },
+    [`${PREFIX}.remote`]: { v: 1, on: true, at: now },
+    [`${PREFIX}.error`]: { message: "Couldn't reach box.", providers: ["codex@box"] } } });
+  await host.tasks[0](host.cx);
+  assert.deepEqual(host.state[`${PREFIX}.data`].providers.map(p => p.key), data.providers.map(p => p.key));
+  assert.equal(host.state[`${PREFIX}.remote`] ?? null, null);
+  const dash = await createHost({ sharedState: { ...host.state, [`${PREFIX}.error`]: { message: "Couldn't reach box.", providers: ["codex@box"] } } });
+  assert.doesNotMatch(flatten(dash.tree()), /Quota needs attention|choose account/);
 });
 test("pane headers schedule nothing: no timers, no tasks, no reads", async () => {
   const runs = [];
@@ -221,7 +262,13 @@ test("Refresh asks the strip, which reads every provider; no shared write to ask
   assert.equal(host.state[`${PREFIX}.control`].reason, "manual");
 });
 test("every endless loop yields to Herdr through cx, and nothing uses browser timers", async () => {
-  const source = await (await import("node:fs/promises")).readFile(new URL("../mods/agent-quota/main.js", import.meta.url), "utf8");
+  const { readFile, readdir } = await import("node:fs/promises");
+  const dir = new URL("../mods/agent-quota/", import.meta.url);
+  // The view and its scheduling: every module but the providers' parsers, whose bounded scans
+  // also use for (;;).
+  const files = (await readdir(dir, { recursive: true })).filter(f => f.endsWith(".js") && !f.startsWith("providers"));
+  assert.ok(files.includes("main.js") && files.includes("reads.js") && files.some(f => f.startsWith("ui")), "every view module");
+  const source = (await Promise.all(files.map(f => readFile(new URL(f, dir), "utf8")))).join("\n");
   assert.doesNotMatch(source, /\b(setTimeout|setInterval|while \(true\))/);
   for (const match of source.matchAll(/for \(;;\) \{/g)) {
     let depth = 0, i = match.index + match[0].length - 1;
@@ -290,4 +337,106 @@ test("the command loop yields to Herdr and stops when commands end", async () =>
   const retired = await createHost({ mode: "strip", data, nextCommand: async () => "noop" });
   retired.cx.phase = () => { throw new Error("view released"); };
   await assert.rejects(retired.tasks[1](retired.cx), /released/);
+});
+test("a provider can leave the status bar and stay in the dashboard and its pane headers", async () => {
+  const host = await createHost({ data });
+  host.view.page = "configure";
+  click(host, `strip-${data.providers[0].key}`);
+  assert.deepEqual(host.state[`${PREFIX}.options`].offStrip, ["codex"]);
+  assert.match(flatten(host.tree()), /not in the status bar/);
+  host.view.page = "overview";
+  assert.match(flatten(host.tree()), /78%/);
+  const strip = await createHost({ mode: "strip", sharedState: { ...host.state } });
+  assert.doesNotMatch(flatten(strip.tree()), /78%/);
+  const header = await createHost({ mode: "header", sharedState: { ...host.state }, runtime: { pane: "p1" }, paneList: [{ pane: "p1", terminal: "t1", program: { key: "codex", name: "Codex", agent: true } }] });
+  assert.match(flatten(header.tree()), /78%/);
+  // And back on.
+  host.view.page = "configure";
+  click(host, `strip-${data.providers[0].key}`);
+  assert.deepEqual(host.state[`${PREFIX}.options`].offStrip, []);
+});
+test("a pane header with no reading for its agent shows no figure at all", async () => {
+  for (const reading of [null, parseReport(JSON.stringify({ schemaVersion: 5, generatedAt: new Date(now).toISOString(), providers: [{ provider: "codex", state: { status: "auth_required" }, windows: [] }] }))]) {
+    const host = await createHost({ mode: "header", data: reading, runtime: { pane: "p1" }, paneList: [{ pane: "p1", terminal: "t1", program: { key: "codex", name: "Codex", agent: true } }] });
+    const tree = host.tree();
+    assert.ok(!ids(tree).includes("quota-for-p1"));
+    assert.doesNotMatch(flatten(tree), /quota|—|null|undefined/);
+  }
+});
+test("each provider's choices are two labeled rows: where it shows, then which limits", async () => {
+  const host = await createHost({ data });
+  host.view.page = "configure";
+  const text = flatten(host.tree());
+  assert.match(text, /Show in\s+Status bar\s+Limits\s+Session/);
+  // Hidden everywhere: neither row is offered.
+  host.state[`${PREFIX}.options`] = { hidden: ["codex"] };
+  assert.doesNotMatch(flatten(host.tree()), /Show in\s+Status bar|Limits\s+Session/);
+});
+
+// Review fixes, local-only.
+const codexPane = { pane: "p1", terminal: "t1", program: { key: "codex", name: "Codex", agent: true } };
+const headerHost = (extra = {}) => createHost({ mode: "header", data, runtime: { pane: "p1" }, paneList: [codexPane], ...extra });
+const lanes = (...specs) => parseReport(JSON.stringify({ schemaVersion: 5, generatedAt: new Date(now).toISOString(), providers: specs.map(([account, status, used]) => ({
+  provider: "codex", accountKeys: [account], state: { status },
+  windows: used === null ? [] : [{ id: "session", label: "Session", kind: "session", percentUsed: used, resetsAt: new Date(now + 3600000).toISOString() }] })) }));
+
+test("a provider hidden everywhere has no figure in its pane header; off the status bar it keeps one", async () => {
+  const hidden = await headerHost({ sharedState: { [`${PREFIX}.data`]: data, [`${PREFIX}.options`]: { hidden: ["codex"] } } });
+  assert.ok(!ids(hidden.tree()).includes("quota-for-p1"));
+  const offStrip = await headerHost({ sharedState: { [`${PREFIX}.data`]: data, [`${PREFIX}.options`]: { offStrip: ["codex"] } } });
+  assert.match(flatten(offStrip.tree()), /78%/);
+});
+test("the header figure is a native, named, focusable button that can't crowd out the pane buttons", async () => {
+  const host = await headerHost();
+  const figure = find(host.tree(), "quota-for-p1");
+  assert.equal(figure.type, "button");
+  assert.match(figure.styles.accessibility_label[0], /^Open Codex quota: Session 78%/);
+  assert.deepEqual(figure.styles.tab_stop, [true]);
+  assert.ok(figure.styles.focus, "a visible focus treatment");
+  // Bounded and shrinking; never flex_none.
+  assert.ok(figure.styles.max_w && figure.styles.truncate && figure.styles.min_w);
+  assert.deepEqual(figure.styles.flex_shrink, [1]); assert.equal(figure.styles.flex_none, undefined);
+  let stopped = false;
+  figure.events.click({}, { stop_propagation() { stopped = true; } });
+  assert.ok(stopped, "clicking the figure doesn't also focus the pane");
+});
+test("a header never shows another machine's lane, even before the strip drops it", async () => {
+  const there = { ...data.providers[0], key: JSON.stringify(["codex", "codex-home", "box"]), machine: "box" };
+  const host = await headerHost({ sharedState: { [`${PREFIX}.data`]: { ...data, providers: [...data.providers, there] } } });
+  const text = flatten(host.tree());
+  assert.match(text, /78%/); assert.doesNotMatch(text, /choose account/);
+});
+test("several accounts are offered in a header only when one has a reading", async () => {
+  const none = await headerHost({ sharedState: { [`${PREFIX}.data`]: lanes(["a", "auth_required", null], ["b", "auth_required", null]) } });
+  assert.ok(!ids(none.tree()).includes("quota-for-p1"));
+  const allHidden = await headerHost({ sharedState: { [`${PREFIX}.data`]: lanes(["a", "fresh", 40], ["b", "fresh", 50]), [`${PREFIX}.options`]: { kinds: { session: false } } } });
+  assert.ok(!ids(allHidden.tree()).includes("quota-for-p1"));
+  const one = await headerHost({ sharedState: { [`${PREFIX}.data`]: lanes(["a", "fresh", 40], ["b", "auth_required", null]) } });
+  assert.match(flatten(one.tree()), /choose account/);
+});
+test("with every provider off the status bar, the bar and its preview say so instead of waiting", async () => {
+  const state = { [`${PREFIX}.data`]: data, [`${PREFIX}.options`]: { offStrip: ["codex"] } };
+  const strip = await createHost({ mode: "strip", sharedState: { ...state } });
+  const text = flatten(strip.tree());
+  assert.match(text, /quota/); assert.doesNotMatch(text, /waiting for agents|78%/);
+  const settings = await createHost({ sharedState: { ...state } });
+  settings.view.page = "configure";
+  assert.match(flatten(settings.tree()), /No providers in the status bar/);
+});
+test("the Settings preview shows the status bar's overflow count", async () => {
+  const many = parseReport(JSON.stringify({ schemaVersion: 5, generatedAt: new Date(now).toISOString(), providers: ["codex", "claude", "grok", "cursor", "kimi", "copilot", "opencode-go", "agy"].map(provider => ({
+    provider, state: { status: "fresh" }, windows: ["a", "b"].map(id => ({ id, label: `${id} window`, kind: "session", percentUsed: 10, resetsAt: new Date(now + 3600000).toISOString() })) })) }));
+  const host = await createHost({ data: many });
+  host.view.page = "configure";
+  const text = flatten(host.tree()); // also sets the frame stripItems reads
+  const preview = host.view.stripItems(host.view.width - 2 * host.view.pad());
+  assert.ok(preview.hidden > 0);
+  assert.match(text, new RegExp(`\\+${preview.hidden}\\b`));
+});
+test("each Settings chip is named with its provider for screen readers", async () => {
+  const host = await createHost({ data });
+  host.view.page = "configure";
+  const tree = host.tree();
+  assert.equal(find(tree, `strip-${data.providers[0].key}`).styles.accessibility_label[0], "Codex in the status bar: shown");
+  assert.match(find(tree, `window-${data.providers[0].windows[0].key}`).styles.accessibility_label[0], /^Codex .+ limit: shown$/);
 });

@@ -1,4 +1,4 @@
-// Regression tests for REVIEW-394cad9.md (F1–F4). Fake collectors only; no credentials.
+// Regression tests for docs/history/REVIEW-394cad9.md (F1–F4). Fake collectors only; no credentials.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile, readFile, rm, readdir } from "node:fs/promises";
@@ -122,8 +122,8 @@ test("H1: setup stages the build and swaps only changed files in one step", asyn
 });
 
 test("H1: the mod needs no runtime file, and setup installs no dependencies", async () => {
-  const source = await readFile(new URL("../mods/agent-quota/main.js", import.meta.url), "utf8");
-  assert.doesNotMatch(source, /\.runtime\.json/);
+  const { bundleView } = await import("../scripts/view-bundle.mjs");
+  assert.doesNotMatch(await bundleView(), /\.runtime\.json/);
   const install = await readFile(new URL("../scripts/install.mjs", import.meta.url), "utf8");
   assert.doesNotMatch(install, /\bcp\(/, "setup must not copy files one by one into the live folder");
   assert.doesNotMatch(install, /npm(\.cmd)?["']?, \["ci"/, "setup installs nothing");
@@ -138,7 +138,8 @@ test("native: every surface renders without passing null to child()", async () =
   }
   // A pane without a program name or title must not hand label() undefined.
   const header = await createHost({ mode: "header", data, runtime: { pane: "p" }, paneList: [{ pane: "p", terminal: "t1", program: { key: "codex", agent: true } }] });
-  assert.match(flatten(header.tree()), /Terminal/);
+  // Herdr's own header calls it "shell" then.
+  assert.match(flatten(header.tree()), /shell/);
 });
 
 test("native: an orphaned claim (copy stopped mid-read) is cleared once it expires", async () => {

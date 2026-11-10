@@ -1,12 +1,13 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+import { bundleView } from "./view-bundle.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const stripImports = s => s.replace(/import[\s\S]*?from\s+"[^";]+";/g, "").replace(/^export \{[^}]*\};?$/gm, "").replaceAll("export default class", "class").replaceAll("export ", "");
 const core = stripImports(await readFile(join(root, "mods/agent-quota/core.js"), "utf8"));
 const collector = stripImports(await readFile(join(root, "mods/agent-quota/collector.js"), "utf8"));
-const main = stripImports(await readFile(join(root, "mods/agent-quota/main.js"), "utf8"));
+const main = await bundleView();
 const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Herdr Agent Quota · synthetic preview</title>
 <style>*{box-sizing:border-box}body{margin:0;background:#121418;color:#e5e7ec;font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:24px}button,select{font:inherit}button{color:inherit;cursor:pointer}button:hover{filter:brightness(1.12)}button:focus-visible{outline:2px solid #8bb3e6;outline-offset:2px}.notice{max-width:950px;margin:0 auto 16px;display:flex;gap:20px;align-items:center;justify-content:space-between;color:#abb0bc}.notice b{color:#e5e7ec}select{background:#242832;color:#e5e7ec;border:1px solid #636b7a;border-radius:5px;padding:6px}#frame{width:min(950px,100%);height:760px;max-height:calc(100vh - 130px);min-height:400px;margin:auto;border:1px solid #363940;border-radius:12px;overflow:hidden;display:flex;flex-direction:column}#dashboard{flex:1;min-height:0}#strip{height:28px}::-webkit-scrollbar{width:8px}::-webkit-scrollbar-thumb{background:#555d6b;border-radius:5px}::selection{background:#48658c;color:white} @media(max-width:600px){body{padding:10px}.notice{flex-wrap:wrap;gap:8px}#frame{height:780px;max-height:none}.notice small{display:block}}</style>
 <div class="notice"><div><b>Herdr Agent Quota</b><small> · Synthetic data · Same UI source, browser layout approximation</small></div><select id="scenario" aria-label="Preview scenario"><option value="normal">Live-style readings</option><option value="stale">Collector unavailable</option><option value="empty">No data</option><option value="light">Light theme</option></select></div><div id="frame"><div id="dashboard"></div><div id="strip"></div></div>
@@ -22,7 +23,7 @@ const dark={foreground:'#e5e7ec',muted:'#abb0bc',dim:'#888e9b',border:'#363940',
 const light={...dark,foreground:'#20242c',muted:'#505a69',dim:'#596372',border:'#cdd2db',input:'#8b95a4',accent:'#3768a0',popover:'#f9fafc',surface:'#edf0f4',chrome:'#eff1f5',background:'#f9fafc',selected:'#dce5f2',hover:'#e5eaf1',working:'#79530c',blocked:'#ad302d',done:'#226b50',idle:'#505a69'};
 let scenario='normal',storage={},properties={},currentTheme=dark;
 const shared=k=>storage[k],setShared=(k,v)=>{storage[k]=v;queueMicrotask(render)},props=()=>properties,theme=()=>currentTheme,settings=()=>({dark:scenario!=='light'});
-class ReadFailure extends Error{};const ADAPTERS=[],home=()=>'',appWindow=()=>({platform:'macos'}),appHome=()=>'',exec=async()=>({code:127}),readTextFile=async()=>null,knownAgents=async()=>[],nextCommand=()=>new Promise(()=>{}),closeOverlay=()=>{},openOverlay=()=>{},run=()=>{};
+class ReadFailure extends Error{};const ADAPTERS=[],ICONS={},ALIASES={},LABELS={},layout=()=>null,home=()=>'',appWindow=()=>({platform:'macos'}),appHome=()=>'',exec=async()=>({code:127}),readTextFile=async()=>null,knownAgents=async()=>[],nextCommand=()=>new Promise(()=>{}),closeOverlay=()=>{},openOverlay=()=>{},run=()=>{};
 const activity=[{address:'t1',space:'s1',space_name:'Personal',tab_name:'Build quota',program:{key:'codex'},status:'working',focused:true},{address:'t2',space:'s2',space_name:'Example project',tab_name:'Review',program:{key:'claude'},status:'blocked'},{address:'remote/t3',space:'s3',space_name:'Practice',tab_name:'Research',program:{key:'grok'},status:'idle'}];
 const agents=()=>scenario==='empty'?[]:activity,spaces=()=>[{id:'s1'},{id:'s2'},{id:'s3',machine:'remote'}],panes=()=>[];
 const cx={focus_handle:()=>({focus(){},is_focused:()=>false}),notify:()=>queueMicrotask(render),stop_propagation(){},spawn(){},timer:{every(){}}};

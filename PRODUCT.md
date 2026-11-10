@@ -35,8 +35,9 @@ for the agent being used.
 Account quota is shared between sessions; do not sum it across spaces.
 Quota availability depends on the provider and authentication. A CLI's
 presence alone does not prove measurable quota. Do not invent token counts,
-percentages, window durations or reset times. Remote agent activity must
-remain distinct from local account quota. Collection must be bounded and
+percentages, window durations or reset times. Quota comes from the sign-ins
+on the computer running this Herdr window; agents on other machines are that
+machine's to show, by its own copy of the mod. Collection must be bounded and
 avoid inference requests. v1 does not associate arbitrary per-terminal
 credentials with a provider account.
 

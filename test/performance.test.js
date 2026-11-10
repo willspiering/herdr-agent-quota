@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHost, walk, flatten } from "./host.js";
-import { parseReport, PREFIX, catalog, options } from "../mods/agent-quota/core.js";
+import { parseReport, PREFIX, catalog, options, localAgents } from "../mods/agent-quota/core.js";
 
 // One fake native provider: `read` decides when and what it answers.
 const lane = { provider: "codex", accountKeys: ["default"], state: { status: "fresh" }, windows: [{ id: "week", label: "week", kind: "weekly", percentUsed: 60 }] };
@@ -122,9 +122,10 @@ test("activity classification is linear in agents and spaces, independent of acc
   const spaces = Array.from({ length: 1000 }, (_, i) => ({ id: `s${i}`, machine: i % 2 ? "remote" : null }));
   const live = spaces.map((_, i) => ({ address: `t${i}`, get space() { reads++; return `s${i}`; }, status: "working", program: { key: "codex" } }));
   const providers = Array.from({ length: 100 }, (_, i) => ({ ...data.providers[0], account: `${i}`, key: `${i}` }));
-  const list = catalog({ providers }, [], live, spaces, options());
+  const list = catalog({ providers }, [], localAgents(live, spaces), spaces, options());
   assert.equal(list.length, 100); assert.ok(reads <= 1000, `${reads} space lookups`);
-  assert.equal(list[0].localSessions.length, 500); assert.equal(list[0].remoteSessions.length, 500);
+  // Only this computer's agents count: half of these run in spaces on another machine.
+  assert.equal(list[0].sessions.length, 500);
   assert.equal(list[0].sessions, list[99].sessions);
 });
 
