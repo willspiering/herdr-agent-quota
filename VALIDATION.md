@@ -384,3 +384,23 @@ checkout. No mod errors in `herdr-app status`.
 Mean +2.0 MiB, changing sign between rounds as before; round 3's quota CPU
 includes one scheduled read. Keyboard traversal and the Classic palette are
 still to be checked by hand; Windows is untested.
+
+## Linux, native, 2026-11-12
+
+Herdr 0.1.15 on Omarchy (Hyprland, Arch), Node 26, branch `grok-bot`. Fresh
+install with `npm run setup`; installed copy matches the checkout. `npm test`,
+`npm run typecheck` and `npm run check` pass. `herdr-app status` shows no mod
+errors (one unrelated SSH layout error for an unreachable remote).
+
+- **Read:** Claude (`~/.claude/.credentials.json`), Codex and Cursor (editor
+  database through `/usr/bin/sqlite3`) show real quota in the strip and the
+  dashboard.
+- **Grok Bot:** its own lane, `[Grok Bot Plan]` · Week 3%, resets in 3d 23h,
+  read from `GetSandUsageStatus` with the Cursor editor's sign-in. Cursor's
+  lane keeps only its two plan limits. Matches Omarchy's agents panel.
+- **Signed out:** Grok (no `~/.grok/auth.json`, no Pi) is left out of the
+  Overview and listed in Settings as "Not signed in".
+- One manual refresh got "Claude: quota could not be read"; the next refresh,
+  90 s later, read normally (transient, likely rate limiting).
+- Not yet checked here: Copilot, OpenCode Go and Kimi (dashboard page 2), pane
+  headers, the light theme.

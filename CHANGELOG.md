@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Grok Bot is its own provider: its weekly included usage, read from Cursor's
+  `GetSandUsageStatus` with the Cursor sign-in (as Omarchy's agents panel
+  does). It used to be an unnamed "Week" row under Cursor, which no longer
+  asks for it. A week with nothing used reads 0%, not "no reading". Saved
+  choices for the old Cursor `grok_bot` limit don't carry over.
+- A provider never signed in on this computer (`signed_out`) stays out of the
+  dashboard, as with no agent installed; Settings → "Providers without quota"
+  still lists it. A sign-in the vendor refused (`auth_required`) still shows,
+  now as "Sign in to … again".
+- Linux: run natively on Omarchy (Herdr 0.1.15). Claude, Codex, Cursor (editor
+  database through sqlite3) and Grok Bot read real quota.
+
 - Internal: main.js is split by job. state.js (shared state), reads.js (the
   read schedule) and ui/ (parts, instruments, strip, dashboard, settings,
   header); main.js keeps only the view's lifecycle. The test host and preview

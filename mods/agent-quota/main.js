@@ -114,7 +114,8 @@ export default class AgentQuota extends View {
       report = this.headerReport;
     } else report = get("data");
     const all = isHeader ? report.providers : catalog(report, get("discovered") ?? [], live, places, o);
-    // Overview lists what can be read or acted on; Settings lists everything.
+    // Overview lists what can be read or acted on; Settings lists everything. A refused sign-in
+    // (auth_required) is something to act on; never signing in here (signed_out) is not.
     // Pane headers skip the catalog, so their lanes have no sessions.
     const useful = p => p.windows.length || p.sessions?.length || p.status === "auth_required" || o.signedOut;
     const config = settings(), font = config.font_family;

@@ -25,7 +25,7 @@ function providerSettings(view, p) {
   const visible = !o.hidden.includes(p.id);
   const limitId = `choices-${p.key}`, limits = pageItems(view, limitId, p.windows, PAGE.limits);
   const inStrip = !o.offStrip.includes(p.id);
-  const hint = `${visible ? "" : "Hidden · "}${p.windows.length ? `${visibleWindows(p, o).length} of ${p.windows.length} limits ${visible ? "shown" : "selected"}` : p.status === "auth_required" ? "Sign-in needed" : "No quota reported"}${visible && !inStrip ? " · not in the status bar" : ""}`;
+  const hint = `${visible ? "" : "Hidden · "}${p.windows.length ? `${visibleWindows(p, o).length} of ${p.windows.length} limits ${visible ? "shown" : "selected"}` : p.status === "auth_required" ? "Sign-in needed" : p.status === "signed_out" ? "Not signed in" : "No quota reported"}${visible && !inStrip ? " · not in the status bar" : ""}`;
   return v_flex().gap(6)
     .child(switchRow(`provider-${p.key}`, `${p.label}${p.multiAccount ? ` · ${p.account}` : ""}`, hint, visible, () => {
       const hidden = view.opts().hidden;

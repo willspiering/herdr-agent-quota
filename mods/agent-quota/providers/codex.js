@@ -84,7 +84,7 @@ export function usageWindows(raw, now) {
 export async function read(io) {
   const now = io.now, signedOut = () => lane(id, label, now, { account: ACCOUNT, status: "auth_required" });
   const sign = await signIn(io);
-  if (!sign) return signedOut();
+  if (!sign) return lane(id, label, now, { account: ACCOUNT, status: "signed_out" }); // never signed in here
   const headers = { authorization: `Bearer ${sign.token}`, accept: "application/json", ...(sign.account ? { "ChatGPT-Account-Id": sign.account } : {}) };
   // The first endpoint is current; the second is the older path. Only the endpoint decides
   // whether a token works: a stored expiry is not checked first.

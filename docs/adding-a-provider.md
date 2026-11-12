@@ -43,7 +43,8 @@ These protect people's sign-ins. Reviews reject a provider that breaks one.
    (Cursor's RPC is a POST), copy those two checks.
 2. **Never refresh a token.** Refreshing can rotate it and sign the person out
    of their own app. A rejected or expired token is a sign-out
-   (`status: "auth_required"`), or `ReadFailure("expired")`.
+   (`status: "auth_required"`), or `ReadFailure("expired")`. No sign-in found
+   at all is `status: "signed_out"`.
 3. **Never return, store, log or put a credential in an error.** A token lives
    in local variables of one `read()`. `ReadFailure` carries only a fixed
    reason. Tests check that no `SECRET` string reaches the result.
@@ -106,8 +107,11 @@ lane(id, label, io.now, { account: "default", plan: "pro", status: "fresh", wind
 limit(io.now, { id: "five_hour", label: "session", kind: "session", percentUsed: 42, resetsAt: iso, windowSeconds: 18000 })
 ```
 
-- `status`: `"fresh"` (read now), `"auth_required"` (signed out or the token
-  was refused) or `"unavailable"` (the service can't report here).
+- `status`: `"fresh"` (read now), `"auth_required"` (a sign-in was found but
+  refused or expired: the dashboard asks to sign in again), `"signed_out"` (no
+  sign-in on this computer at all: the dashboard leaves the provider out unless
+  "Providers without quota" is on) or `"unavailable"` (the service can't report
+  here).
 - `kind` decides the default visibility and short label: `session` (shown as
   `5h`), `weekly` (`Week`), `monthly` (`Month`), `credits`, `model` (hidden by
   default) or `unknown`.
@@ -148,7 +152,7 @@ async function signIn(io) {
 export async function read(io) {
   const now = io.now, signedOut = () => lane(id, label, now, { status: "auth_required" });
   const token = await signIn(io);
-  if (!token) return signedOut();
+  if (!token) return lane(id, label, now, { status: "signed_out" }); // never signed in here
   const answer = await getJson(io, USAGE, { authorization: `Bearer ${token}`, accept: "application/json" });
   if (answer.auth) return signedOut();
   const session = obj(answer.body?.session), used = num(session?.used_percent);
@@ -195,8 +199,8 @@ test("reads the session limit and sends the token only to the vendor", async () 
   assert.ok(!JSON.stringify(lane).includes("SECRET"));
 });
 
-test("no sign-in, or a refused one, is a sign-out", async () => {
-  assert.equal((await example.read(fakeIo())).state.status, "auth_required");
+test("no sign-in is signed_out; a refused one asks to sign in again", async () => {
+  assert.equal((await example.read(fakeIo())).state.status, "signed_out");
   const refused = fakeIo({ files: { [FILE]: JSON.stringify({ access_token: "tok" }) }, routes: { [USAGE]: [401, {}] } });
   assert.equal((await example.read(refused)).state.status, "auth_required");
 });

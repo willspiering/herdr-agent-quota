@@ -24,9 +24,16 @@ Each provider is read from where its own app or CLI keeps its sign-in:
 | Kimi | Kimi Code CLI (~/.kimi-code) or Pi (~/.pi/agent/auth.json) | Kimi Code CLI (~/.kimi-code) or Pi (~/.pi/agent/auth.json) | Kimi Code CLI (~/.kimi-code) or Pi (~/.pi/agent/auth.json) |
 | Antigravity | The running app's local server (ps, lsof) | The running app's local server (ps, lsof) | Not supported |
 | Grok | Grok CLI (~/.grok/auth.json) or Pi (~/.pi/agent/auth.json) | Grok CLI (~/.grok/auth.json) or Pi (~/.pi/agent/auth.json) | Grok CLI (~/.grok/auth.json) or Pi (~/.pi/agent/auth.json) |
+| Grok Bot | Cursor sign-in: editor database (sqlite3), Cursor CLI (Keychain) | Cursor sign-in: editor database (sqlite3), Cursor CLI (~/.config/cursor/auth.json) | Not supported |
 
-macOS is tested natively. Linux and Windows follow the same code paths but
-haven't been run natively yet; please open an issue with what you see.
+Grok and Grok Bot are separate allowances. Grok is the Grok CLI's grok.com
+credits; Grok Bot runs on a Cursor account and has its own weekly allowance,
+read with the Cursor sign-in. A Cursor account without Grok Bot shows no Grok
+Bot lane.
+
+macOS is tested natively. Linux has been run natively on Omarchy (Claude,
+Codex, Cursor and Grok Bot; see VALIDATION.md). Windows follows the same code
+paths but hasn't been run natively yet; please open an issue with what you see.
 
 A few sign-ins need a system program: `security` for macOS Keychain items,
 `sqlite3` for Cursor's and OpenCode's databases, and `ps`/`lsof` to find a
@@ -86,8 +93,8 @@ Start with `herdr-app status`: it lists any mod or layout errors.
 
 | What you see | What to do |
 | --- | --- |
-| A provider is missing | Its agent isn't installed or signed in here. Turn on Settings → "Providers without quota" to list it anyway, and check the table above for your system. |
-| "Sign-in needed" | Sign in with that agent's own app or CLI on this computer, then press Refresh. |
+| A provider is missing | It was never signed in on this computer, so the dashboard leaves it out. Turn on Settings → "Providers without quota" to list it anyway, and check the table above for your system. |
+| "Sign-in needed" | Its saved sign-in was refused. Sign in again with that agent's own app or CLI on this computer, then press Refresh. |
 | "needs one Keychain approval" | Press Refresh in the dashboard and allow the prompt (macOS). |
 | "quota could not be read" / "Stale · refresh" | The provider didn't answer. Earlier readings are kept and retries back off; press Refresh later. |
 | Cursor or OpenCode Go missing on Linux | Install `sqlite3` (`/usr/bin` or `/usr/local/bin`). |

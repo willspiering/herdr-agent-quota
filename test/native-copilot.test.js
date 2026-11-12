@@ -104,13 +104,13 @@ test("copilot never reads a Keychain secret without consent", async () => {
   assert.ok(withGh.execs.every(args => !args.includes("-w")));
   // Off macOS there is no Keychain to read.
   const linux = fakeIo({ files: { [CLI]: cliConfig() }, keychain: TOKEN, platform: "linux" });
-  assert.equal((await copilot.read(linux)).state.status, "auth_required");
+  assert.equal((await copilot.read(linux)).state.status, "signed_out"); // no readable sign-in there
   assert.equal(linux.execs.length, 0);
 });
 
 test("copilot: no credential or a rejected one is signed out", async () => {
   const none = await copilot.read(fakeIo());
-  assert.equal(none.state.status, "auth_required");
+  assert.equal(none.state.status, "signed_out"); // never signed in: left out of the dashboard
   assert.deepEqual(none.windows, []);
   assert.deepEqual(none.accountKeys, ["default"]);
   for (const status of [401, 403]) {
@@ -123,7 +123,7 @@ test("copilot: no credential or a rejected one is signed out", async () => {
   const otherHost = JSON.stringify({ "ghe.example.com:Iv1": { oauth_token: TOKEN } });
   for (const files of [{ [GH]: keyring }, { [APPS]: otherHost }, { [GH]: ghHosts("$GH_TOKEN") }, { [GH]: "github.com:\n\toauth_token: x\n" }]) {
     const io = fakeIo({ files });
-    assert.equal((await copilot.read(io)).state.status, "auth_required");
+    assert.equal((await copilot.read(io)).state.status, "signed_out");
     assert.equal(io.requests.length, 0);
   }
   // A Copilot CLI account whose item can't be read is unmeasured, not signed out.

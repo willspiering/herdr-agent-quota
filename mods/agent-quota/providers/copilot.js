@@ -255,7 +255,7 @@ function quota(raw, now) {
 // login. A rejected token hands over to the next store; any other failure stops the read.
 export async function read(io) {
   const now = io.now;
-  let unavailable = false, consent = false;
+  let unavailable = false, consent = false, tried = false;
   const sources = [
     async () => appsToken((await readFile(io, appsPath(io))).text),
     async () => {
@@ -269,6 +269,7 @@ export async function read(io) {
   for (const source of sources) {
     const token = await source();
     if (!token) continue;
+    tried = true;
     const answer = await getJson(io, USER, { ...HEADERS, authorization: `Bearer ${token}` });
     if (answer.auth) continue;
     const found = quota(answer.body, now);
@@ -277,5 +278,6 @@ export async function read(io) {
   }
   // A Copilot CLI account whose Keychain item awaits approval: not signed out, just unread.
   if (consent) throw new ReadFailure("keychain");
-  return lane(id, label, now, { status: unavailable ? "unavailable" : "auth_required" });
+  // No sign-in at all is "signed_out" (left out of the dashboard); a refused one asks to sign in.
+  return lane(id, label, now, { status: unavailable ? "unavailable" : tried ? "auth_required" : "signed_out" });
 }
