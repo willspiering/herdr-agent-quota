@@ -402,5 +402,15 @@ errors (one unrelated SSH layout error for an unreachable remote).
   Overview and listed in Settings as "Not signed in".
 - One manual refresh got "Claude: quota could not be read"; the next refresh,
   90 s later, read normally (transient, likely rate limiting).
-- Not yet checked here: Copilot, OpenCode Go and Kimi (dashboard page 2), pane
-  headers, the light theme.
+- **Settings, all 4 pages** (paged by a temporary installed build that starts
+  each list on page N, since `herdr-app` can't click; restored with
+  `npm run setup` afterward): Grok Bot "1 of 1 limits shown"; Cursor "2 of 2"
+  (Included usage, Auto usage); Kimi and GitHub Copilot "Not signed in";
+  Antigravity, Crush, OpenCode and Pi "No quota reported".
+- **Copilot gap:** this machine's `gh` login keeps its token in the system
+  keyring (`gh auth status` says `(keyring)`), so `hosts.yml` holds none and
+  Copilot reads as not signed in. Omarchy's panel asks `gh auth token`.
+- Each reload of the mod starts a read; three in a minute got "could not be
+  read" from Claude, Codex and two more, which cleared on later reads.
+- Not yet checked here: the Overview's second page, pane headers, the light
+  theme.
