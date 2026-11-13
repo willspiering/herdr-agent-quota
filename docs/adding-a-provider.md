@@ -52,7 +52,10 @@ These protect people's sign-ins. Reviews reject a provider that breaks one.
    only through `keychain()` in `platform.js`, and only when
    `io.keychain.allowed` is true. Otherwise check presence with
    `{ secret: false }` and throw `ReadFailure("keychain")` so the person can
-   approve it with Refresh.
+   approve it with Refresh. Asking another program for a secret it keeps in a
+   keyring (Copilot's `githubCli()`) follows the same consent and throws
+   `ReadFailure("keyring")` until approved. Run only a fixed command, from a
+   fixed path, check the answer's shape, and never read its stderr.
 5. **Paths and programs come from `platform.js`.** Use `homeFile(io, …)` for
    files and `program()`/`canRun()`/`sqlite()`/`keychain()` for programs. Don't
    test `io.platform` or write `/usr/bin/…` in a provider; a test enforces this.
@@ -126,6 +129,7 @@ reading is kept and marked stale.
 | `unreachable`, `server`, `malformed`, `redirected`, `timeout`, `rate-limited` | Kept, stale; retries back off. |
 | `expired` | "sign-in expired. Open it once to renew." |
 | `keychain` | "needs one Keychain approval. Press Refresh…" No back-off. |
+| `keyring` | "reads its GitHub CLI sign-in from the keyring once you press Refresh…" No back-off. |
 | `not-running`, `no-quota`, `no-endpoint` | Quiet: nothing to read now, no error shown. |
 
 ## Template

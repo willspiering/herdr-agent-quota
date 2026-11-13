@@ -46,8 +46,10 @@ export default class AgentQuota extends View {
     this.queued = false;
     this.statuses = null;
     this.finishedAt = 0;
-    // Each paged list's current page (ui/parts.js pageItems).
+    // Each paged list's current page (ui/parts.js pageItems), and a page command to apply.
     this.pages = {};
+    this.turn = null;
+    this.turnAt = get("turn")?.at ?? 0;
     // Pane headers, one per pane, only display. The strip schedules and runs reads; an opened
     // dashboard asks it for one. The 10 s check is in-memory: it reads only when one is due.
     if (this.mode !== "header") cx.spawn(async cx => {
@@ -75,6 +77,8 @@ export default class AgentQuota extends View {
         if (command === "settings") this.open(null, "configure");
         if (command === "refresh") this.refresh(cx);
         if (command === "look") this.tick(cx, { looking: true });
+        // Dashboards turn their own pages (see turnPage); the strip only passes the press on.
+        if (command === "next-page" || command === "prev-page") put("turn", { delta: command === "next-page" ? 1 : -1, at: Date.now() });
       }
     });
   }
@@ -164,6 +168,17 @@ export default class AgentQuota extends View {
     this.page = view.page === "configure" ? "configure" : "overview";
   }
 
+  // A newer next-page/prev-page press: turn the shown page's provider list (ui/parts.js
+  // pageItems applies it, wrapping around). A press older than 2 s is dropped, so a panel shown
+  // later doesn't replay it.
+  turnPage() {
+    const turn = get("turn");
+    if (!(turn?.at > this.turnAt)) return;
+    this.turnAt = turn.at;
+    if (Date.now() - turn.at > 2000) return;
+    this.turn = { list: this.page === "configure" ? "configure-providers" : "overview-providers", delta: turn.delta === -1 ? -1 : 1 };
+  }
+
   // ── drawing ──────────────────────────────────────────────
   pad() { return pad(this); }
   stripItems(width) { return stripItems(this.f, width); }
@@ -171,7 +186,12 @@ export default class AgentQuota extends View {
     if (this.docked) this.follow();
     this.drawn = true;
     this.f = this.frame();
-    if (this.mode === "dashboard") return dashboard(this);
+    if (this.mode === "dashboard") {
+      this.turnPage();
+      const drawn = dashboard(this);
+      this.turn = null;
+      return drawn;
+    }
     if (this.mode === "header") return header(this);
     return strip(this);
   }

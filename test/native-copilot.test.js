@@ -118,10 +118,10 @@ test("copilot: no credential or a rejected one is signed out", async () => {
     assert.equal(lane.state.status, "auth_required");
     assert.deepEqual(lane.windows, []);
   }
-  // A keyring gh login, a token for another host, a $reference: no credential, nothing sent.
-  const keyring = "github.com:\n    git_protocol: https\n    user: octo\n";
+  // A token for another host, a $reference: no credential, nothing sent. (A keyring gh login is
+  // read through gh: test/native-copilot-gh.test.js.)
   const otherHost = JSON.stringify({ "ghe.example.com:Iv1": { oauth_token: TOKEN } });
-  for (const files of [{ [GH]: keyring }, { [APPS]: otherHost }, { [GH]: ghHosts("$GH_TOKEN") }, { [GH]: "github.com:\n\toauth_token: x\n" }]) {
+  for (const files of [{ [APPS]: otherHost }, { [GH]: ghHosts("$GH_TOKEN") }, { [GH]: "github.com:\n\toauth_token: x\n" }]) {
     const io = fakeIo({ files });
     assert.equal((await copilot.read(io)).state.status, "signed_out");
     assert.equal(io.requests.length, 0);

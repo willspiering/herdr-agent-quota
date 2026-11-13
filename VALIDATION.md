@@ -410,6 +410,23 @@ errors (one unrelated SSH layout error for an unreachable remote).
 - **Copilot gap:** this machine's `gh` login keeps its token in the system
   keyring (`gh auth status` says `(keyring)`), so `hosts.yml` holds none and
   Copilot reads as not signed in. Omarchy's panel asks `gh auth token`.
+  Fixed the next day, below.
+
+### Linux, native, 2026-11-13: Copilot through gh, page commands
+
+- **Copilot through `gh`:** `gh` here is mise's (`~/.local/share/mise/shims/gh`,
+  gh 2.103.3). The exact command the mod runs (through `/usr/bin/env`, from
+  home) exited 0 with a `gho_` token; checked by shape only, never printed.
+  After a Refresh, Copilot read fresh: plan "individual", Chat and Completions
+  0%, Premium interactions 100%, all resetting on the month's reset. Settings
+  shows "GitHub Copilot · 3 of 3 limits shown". The control record keeps only
+  the grant id `copilot`; no token-shaped string is anywhere in `shared.json`.
+  No keyring prompt appeared (the keyring was unlocked).
+- Not seen natively: the background "press Refresh" wait before the first
+  approval (no sweep was due within the check; covered by tests).
+- **Page commands:** with Settings open, `herdr-app do agent-quota.next-page`
+  twice went Page 1 → Page 3 of 4, and `prev-page` back to Page 2. Page 2's
+  fourth entry is Gemini, page 3's is Kiro ("No quota reported").
 - Each reload of the mod starts a read; three in a minute got "could not be
   read" from Claude, Codex and two more, which cleared on later reads.
 - Not yet checked here: the Overview's second page, pane headers, the light

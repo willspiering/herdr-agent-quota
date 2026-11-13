@@ -18,7 +18,7 @@ Each provider is read from where its own app or CLI keeps its sign-in:
 | --- | --- | --- | --- |
 | Claude | Keychain, or ~/.claude/.credentials.json | ~/.claude/.credentials.json | ~/.claude/.credentials.json |
 | Codex | ~/.codex/auth.json | ~/.codex/auth.json | ~/.codex/auth.json |
-| GitHub Copilot | Editor sign-in (apps.json), GitHub CLI (hosts.yml), Copilot CLI (Keychain) | Editor sign-in (apps.json), GitHub CLI (hosts.yml) | Editor sign-in (apps.json), GitHub CLI (hosts.yml) |
+| GitHub Copilot | Editor sign-in (apps.json), GitHub CLI (hosts.yml or Keychain via gh), Copilot CLI (Keychain) | Editor sign-in (apps.json), GitHub CLI (hosts.yml or keyring via gh) | Editor sign-in (apps.json), GitHub CLI (hosts.yml) |
 | Cursor | Editor database (sqlite3), Cursor CLI (Keychain) | Editor database (sqlite3), Cursor CLI (~/.config/cursor/auth.json) | Not supported |
 | OpenCode Go | OpenCode database (sqlite3) or auth.json | OpenCode database (sqlite3) or auth.json | auth.json only |
 | Kimi | Kimi Code CLI (~/.kimi-code) or Pi (~/.pi/agent/auth.json) | Kimi Code CLI (~/.kimi-code) or Pi (~/.pi/agent/auth.json) | Kimi Code CLI (~/.kimi-code) or Pi (~/.pi/agent/auth.json) |
@@ -31,13 +31,23 @@ credits; Grok Bot runs on a Cursor account and has its own weekly allowance,
 read with the Cursor sign-in. A Cursor account without Grok Bot shows no Grok
 Bot lane.
 
+GitHub Copilot can use a GitHub CLI login whose token `gh` keeps in the system
+keyring (macOS Keychain, a Linux keyring) rather than in `hosts.yml`. The mod
+then runs `gh auth token --hostname github.com` and nothing else: only when
+`hosts.yml` shows such a login, only `gh` installed at a known path (never
+whatever comes first on PATH), and only after you approve it once with
+Refresh. The token goes in one request to `api.github.com`, the endpoint the
+Copilot CLI itself reads, and is never stored, logged or shown. That request's
+answer includes your GitHub login; the mod discards it and keeps only the
+quota and plan name. GitHub sees the same request Copilot already makes.
+
 macOS is tested natively. Linux has been run natively on Omarchy (Claude,
-Codex, Cursor and Grok Bot; see VALIDATION.md). Windows follows the same code
+Codex, Cursor, Grok Bot and Copilot through `gh`; see VALIDATION.md). Windows follows the same code
 paths but hasn't been run natively yet; please open an issue with what you see.
 
 A few sign-ins need a system program: `security` for macOS Keychain items,
-`sqlite3` for Cursor's and OpenCode's databases, and `ps`/`lsof` to find a
-running Antigravity. Sign-ins are read from their default locations:
+`sqlite3` for Cursor's and OpenCode's databases, `ps`/`lsof` to find a
+running Antigravity, and `gh` for a GitHub CLI keyring login. Sign-ins are read from their default locations:
 environment-variable overrides (such as `CODEX_HOME`) aren't visible to Herdr
 mods, and only each provider's default profile is read.
 
@@ -75,8 +85,10 @@ without changing anything.
 Click the quota strip in the status bar (or press `cmd-shift-u`; `ctrl-shift-u`
 off macOS) to open the dashboard beside your terminals; click again to close
 it. Setup binds that key only if it's free. Other keys you can bind in
-`keys.json`: `"agent-quota.open"`, `"agent-quota.settings"` and
-`"agent-quota.refresh"`.
+`keys.json`: `"agent-quota.open"`, `"agent-quota.settings"`,
+`"agent-quota.refresh"`, and `"agent-quota.next-page"` /
+`"agent-quota.prev-page"`, which turn the open dashboard's provider pages
+(Overview or Settings, whichever is showing) and wrap around at the ends.
 
 Settings, in the same column, chooses the strip style (Meter, Blocks, Numbers),
 Used or Left, the dashboard layout, colors, the redline, and which providers
@@ -85,7 +97,8 @@ hidden provider keeps its limit choices for when you show it again.
 
 On macOS, a background read never raises a Keychain prompt. If the dashboard
 asks for a Keychain approval, press Refresh once and allow access; the mod
-remembers that the grant works, never the secret itself.
+remembers that the grant works, never the secret itself. A GitHub CLI keyring
+login works the same way on every system: `gh` runs only after one Refresh.
 
 ## Troubleshooting
 
@@ -96,6 +109,8 @@ Start with `herdr-app status`: it lists any mod or layout errors.
 | A provider is missing | It was never signed in on this computer, so the dashboard leaves it out. Turn on Settings → "Providers without quota" to list it anyway, and check the table above for your system. |
 | "Sign-in needed" | Its saved sign-in was refused. Sign in again with that agent's own app or CLI on this computer, then press Refresh. |
 | "needs one Keychain approval" | Press Refresh in the dashboard and allow the prompt (macOS). |
+| "reads its GitHub CLI sign-in from the keyring once you press Refresh" | Press Refresh once; the mod then asks `gh` for Copilot's token. |
+| GitHub Copilot "Not signed in" with `gh` signed in | Check `gh auth status`, and that `gh` is in `/usr/bin`, `/usr/local/bin`, Homebrew, Nix, `~/.local/bin` or mise's shims. |
 | "quota could not be read" / "Stale · refresh" | The provider didn't answer. Earlier readings are kept and retries back off; press Refresh later. |
 | Cursor or OpenCode Go missing on Linux | Install `sqlite3` (`/usr/bin` or `/usr/local/bin`). |
 | No strip at all | Check the layout is `agent-quota` (`herdr-app status`), then `herdr-app check ~/.config/herdr-app/mods/agent-quota`. |
