@@ -88,7 +88,7 @@ test("kimi falls back to the Kimi Code CLI sign-in, and a global config sends it
 test("kimi without any sign-in, or with a rejected token, is signed out; it never refreshes", async () => {
   const none = fakeIo();
   const lane = await kimi.read(none);
-  assert.equal(lane.state.status, "auth_required"); assert.deepEqual(lane.windows, []); assert.equal(none.requests.length, 0);
+  assert.equal(lane.state.status, "signed_out"); assert.deepEqual(lane.windows, []); assert.equal(none.requests.length, 0);
   const rejected = fakeIo({ files: { [PI]: piApiKey(), [CLI]: cliCred() }, routes: { [USAGES]: [401, {}] } });
   assert.equal((await kimi.read(rejected)).state.status, "auth_required");
   assert.deepEqual(rejected.requests.map(r => r.url), [USAGES, USAGES]); // both stores tried, no refresh endpoint
@@ -98,7 +98,7 @@ test("kimi without any sign-in, or with a rejected token, is signed out; it neve
   const hard = fakeIo({ files: { [PI]: piOauth({ expires: now - 1, refresh: undefined }) }, routes: { [USAGES]: [401, {}] } });
   assert.equal((await kimi.read(hard)).state.status, "auth_required");
   // A reference instead of a literal secret is never resolved.
-  assert.equal((await kimi.read(fakeIo({ files: { [PI]: piApiKey({ key: "$KIMI_KEY" }) }, routes: { [USAGES]: [200, body] } }))).state.status, "auth_required");
+  assert.equal((await kimi.read(fakeIo({ files: { [PI]: piApiKey({ key: "$KIMI_KEY" }) }, routes: { [USAGES]: [200, body] } }))).state.status, "signed_out");
 });
 
 test("kimi: outages, rate limits, redirects and odd answers keep earlier readings", async () => {
@@ -202,7 +202,8 @@ test("kimi's whole read agrees with quota-axi's adapter on status and limits", a
       assert.deepEqual(mine.windows.map(axiShape), axi.windows.map(axiShape), label);
       assert.deepEqual(mine.untrustedWindowIds, axi.state.untrustedWindowIds ?? [], label);
     } else if (axi.state.status === "auth_required") {
-      assert.equal(mine.state?.status, "auth_required", label);
+      // quota-axi has one status for both; the mod tells never-signed-in apart from refused.
+      assert.ok(["auth_required", "signed_out"].includes(mine.state?.status), label);
     } else {
       // Anything else is a failed read: the mod keeps its earlier reading.
       assert.ok(mine.failed, `${label}: quota-axi said ${axi.state.status}`);

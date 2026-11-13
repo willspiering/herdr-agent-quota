@@ -2,15 +2,15 @@
 // Ported from quota-axi 0.1.69 providers/copilot.js and its credential readers (MIT). Never
 // refreshes or exchanges a token, and only sends one to GitHub's own API host.
 import { ReadFailure, str, num, name as plain, clampPercent, limit, lane, getJson, parseJson } from "./common.js";
-import { homeFile, canRun, keychain, KEYCHAIN_MISSING } from "./platform.js";
+import { homeFile, canRun, keychain, githubCli, KEYCHAIN_MISSING } from "./platform.js";
 
 export const id = "copilot";
 export const label = "GitHub Copilot";
 export const agents = ["github-copilot"];
 export const icon = "icons/copilot.svg";
 export const platforms = {
-  macos: "Editor sign-in (apps.json), GitHub CLI (hosts.yml), Copilot CLI (Keychain)",
-  linux: "Editor sign-in (apps.json), GitHub CLI (hosts.yml)",
+  macos: "Editor sign-in (apps.json), GitHub CLI (hosts.yml or Keychain via gh), Copilot CLI (Keychain)",
+  linux: "Editor sign-in (apps.json), GitHub CLI (hosts.yml or keyring via gh)",
   windows: "Editor sign-in (apps.json), GitHub CLI (hosts.yml)",
 };
 // quota-axi reads github.com unless QUOTA_AXI_COPILOT_HOST names a *.ghe.com host; Herdr can't
@@ -204,7 +204,7 @@ function scanHosts(text, target) {
   if (pending) recordEmpty(pending);
   return result;
 }
-// A keyring login (no token in the file) is never read: `gh` is not launched for a token.
+// A plain-text login: the token is in the file.
 function ghToken(text) {
   if (text == null || utf8Length(text) > HOSTS_LIMIT) return undefined;
   const scanned = scanHosts(text, "github.com");
@@ -212,6 +212,29 @@ function ghToken(text) {
   const token = scanned.token;
   // Only a literal secret: never a $reference or !command, never a control character.
   return token.trim() && !token.startsWith("!") && !token.includes("$") && !controls(token) ? token : undefined;
+}
+// A github.com login whose token isn't in the file: gh keeps it in the system keyring (the
+// macOS Keychain, a Linux Secret Service keyring). Only this shape ever launches gh.
+function keyringLogin(text) {
+  if (text == null || utf8Length(text) > HOSTS_LIMIT) return false;
+  const scanned = scanHosts(text, "github.com");
+  return !scanned.invalid && scanned.host === "mapping" && scanned.token === undefined;
+}
+// The keyring login's token, from `gh auth token --hostname github.com` (see githubCli in
+// platform.js). Like a Keychain item, it is asked for only with consent (`io.keychain.allowed`:
+// granted before, or a Refresh the user pressed), since a locked keyring may show a prompt.
+// Outcomes as cliToken's. The token is checked for GitHub's own shape, used for one request to
+// api.github.com, and never kept, logged or shown; gh's stderr is never read.
+async function keyringToken(io, text) {
+  if (!keyringLogin(text)) return { silent: true };
+  if (io.keychain && !io.keychain.allowed) return { consent: true };
+  const result = await githubCli(io);
+  if (!result) return { silent: true }; // no gh installed here: nothing to ask
+  if (result.code !== 0) { if (io.keychain) io.keychain.denied = true; return { unavailable: true }; }
+  const token = result.stdout.replace(/[\r\n]+$/, "");
+  if (token.length > TOKEN_LIMIT || !/^(?:gho_|ghu_|ghp_|github_pat_)[A-Za-z0-9_]+$/.test(token)) return { unavailable: true };
+  if (io.keychain) io.keychain.granted = true;
+  return { token };
 }
 const GH_HOSTS = { macos: ".config/gh/hosts.yml", linux: ".config/gh/hosts.yml", windows: "AppData/Roaming/GitHub CLI/hosts.yml" };
 const ghPath = io => homeFile(io, GH_HOSTS);
@@ -252,10 +275,11 @@ function quota(raw, now) {
 }
 
 // quota-axi's source order: apps.json, the Copilot CLI's Keychain item, then the GitHub CLI's
-// login. A rejected token hands over to the next store; any other failure stops the read.
+// login (its hosts.yml token, or else its keyring token through gh). A rejected token hands over
+// to the next store; any other failure stops the read.
 export async function read(io) {
   const now = io.now;
-  let unavailable = false, consent = false;
+  let unavailable = false, consent = false, keyring = false, tried = false;
   const sources = [
     async () => appsToken((await readFile(io, appsPath(io))).text),
     async () => {
@@ -264,11 +288,20 @@ export async function read(io) {
       if (cli.consent) consent = true;
       return cli.token;
     },
-    async () => ghToken((await readFile(io, ghPath(io))).text),
+    async () => {
+      const text = (await readFile(io, ghPath(io))).text;
+      const plain = ghToken(text);
+      if (plain) return plain;
+      const kept = await keyringToken(io, text);
+      if (kept.unavailable) unavailable = true;
+      if (kept.consent) keyring = true;
+      return kept.token;
+    },
   ];
   for (const source of sources) {
     const token = await source();
     if (!token) continue;
+    tried = true;
     const answer = await getJson(io, USER, { ...HEADERS, authorization: `Bearer ${token}` });
     if (answer.auth) continue;
     const found = quota(answer.body, now);
@@ -277,5 +310,8 @@ export async function read(io) {
   }
   // A Copilot CLI account whose Keychain item awaits approval: not signed out, just unread.
   if (consent) throw new ReadFailure("keychain");
-  return lane(id, label, now, { status: unavailable ? "unavailable" : "auth_required" });
+  // A gh keyring login not yet approved: the same, through gh.
+  if (keyring) throw new ReadFailure("keyring");
+  // No sign-in at all is "signed_out" (left out of the dashboard); a refused one asks to sign in.
+  return lane(id, label, now, { status: unavailable ? "unavailable" : tried ? "auth_required" : "signed_out" });
 }

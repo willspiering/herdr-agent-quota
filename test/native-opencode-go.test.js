@@ -85,11 +85,11 @@ test("opencode-go: a refused database key falls back to auth.json; a refused las
   noSecrets(out);
 });
 
-test("opencode-go: no sign-in anywhere is auth_required with no request", async () => {
+test("opencode-go: no sign-in anywhere is signed_out with no request", async () => {
   for (const io of [fakeIo(), fakeIo({ sqlite: null }), fakeIo({ sqlite: { code: 1, stdout: "", stderr: "Parse error: no such table: credential" } }),
     fakeIo({ sqlite: { code: 0, stdout: "", stderr: "" } }), fakeIo({ files: { [AUTH]: JSON.stringify({ anthropic: { key: KEY } }) } }), fakeIo({ platform: "windows" })]) {
     const lane = await opencode.read(io);
-    assert.equal(lane.state.status, "auth_required"); assert.deepEqual(lane.windows, []);
+    assert.equal(lane.state.status, "signed_out"); assert.deepEqual(lane.windows, []);
     assert.equal(io.requests.length, 0);
   }
   // Windows has no known sqlite3 path; quota-axi's LOCALAPPDATA default is used for auth.json.
@@ -169,7 +169,7 @@ test("auth.json keys are picked the way quota-axi picks them", async () => {
     if (axi.status === "available") {
       assert.equal((await opencode.read(io)).state.status, "fresh");
       assert.equal(io.requests[0].headers.authorization, `Bearer ${axi.key}`);
-    } else if (axi.status === "missing") assert.equal((await opencode.read(io)).state.status, "auth_required");
+    } else if (axi.status === "missing") assert.equal((await opencode.read(io)).state.status, "signed_out");
     else await assert.rejects(opencode.read(io), e => e instanceof ReadFailure && e.message === "credential");
   }
 });

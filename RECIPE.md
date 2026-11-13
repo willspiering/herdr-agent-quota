@@ -99,7 +99,9 @@ Activity is grouped once per provider using a space map, independent of account 
 Ordinary scroll areas eagerly build their offscreen content. Bound the dashboard
 and Settings to four provider/account sections per page, eight limit instruments
 or chips per account, and eight agent rows per account. Previous/Next controls
-keep every item reachable. Keep redline summary text bounded, with an overflow count.
+keep every item reachable; `agent-quota.next-page`/`prev-page` (delivered to the
+strip, passed on in shared state, dropped after 2 s) turn the shown page's provider
+list, wrapping. Keep redline summary text bounded, with an overflow count.
 
 The installer clones through `layout.clone` to retain click state, changes
 only its clone, preserves the existing status mod and refuses unfamiliar

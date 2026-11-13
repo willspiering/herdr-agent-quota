@@ -384,3 +384,50 @@ checkout. No mod errors in `herdr-app status`.
 Mean +2.0 MiB, changing sign between rounds as before; round 3's quota CPU
 includes one scheduled read. Keyboard traversal and the Classic palette are
 still to be checked by hand; Windows is untested.
+
+## Linux, native, 2026-11-12
+
+Herdr 0.1.15 on Omarchy (Hyprland, Arch), Node 26, branch `grok-bot`. Fresh
+install with `npm run setup`; installed copy matches the checkout. `npm test`,
+`npm run typecheck` and `npm run check` pass. `herdr-app status` shows no mod
+errors (one unrelated SSH layout error for an unreachable remote).
+
+- **Read:** Claude (`~/.claude/.credentials.json`), Codex and Cursor (editor
+  database through `/usr/bin/sqlite3`) show real quota in the strip and the
+  dashboard.
+- **Grok Bot:** its own lane, `[Grok Bot Plan]` · Week 3%, resets in 3d 23h,
+  read from `GetSandUsageStatus` with the Cursor editor's sign-in. Cursor's
+  lane keeps only its two plan limits. Matches Omarchy's agents panel.
+- **Signed out:** Grok (no `~/.grok/auth.json`, no Pi) is left out of the
+  Overview and listed in Settings as "Not signed in".
+- One manual refresh got "Claude: quota could not be read"; the next refresh,
+  90 s later, read normally (transient, likely rate limiting).
+- **Settings, all 4 pages** (paged by a temporary installed build that starts
+  each list on page N, since `herdr-app` can't click; restored with
+  `npm run setup` afterward): Grok Bot "1 of 1 limits shown"; Cursor "2 of 2"
+  (Included usage, Auto usage); Kimi and GitHub Copilot "Not signed in";
+  Antigravity, Crush, OpenCode and Pi "No quota reported".
+- **Copilot gap:** this machine's `gh` login keeps its token in the system
+  keyring (`gh auth status` says `(keyring)`), so `hosts.yml` holds none and
+  Copilot reads as not signed in. Omarchy's panel asks `gh auth token`.
+  Fixed the next day, below.
+
+### Linux, native, 2026-11-13: Copilot through gh, page commands
+
+- **Copilot through `gh`:** `gh` here is mise's (`~/.local/share/mise/shims/gh`,
+  gh 2.103.3). The exact command the mod runs (through `/usr/bin/env`, from
+  home) exited 0 with a `gho_` token; checked by shape only, never printed.
+  After a Refresh, Copilot read fresh: plan "individual", Chat and Completions
+  0%, Premium interactions 100%, all resetting on the month's reset. Settings
+  shows "GitHub Copilot · 3 of 3 limits shown". The control record keeps only
+  the grant id `copilot`; no token-shaped string is anywhere in `shared.json`.
+  No keyring prompt appeared (the keyring was unlocked).
+- Not seen natively: the background "press Refresh" wait before the first
+  approval (no sweep was due within the check; covered by tests).
+- **Page commands:** with Settings open, `herdr-app do agent-quota.next-page`
+  twice went Page 1 → Page 3 of 4, and `prev-page` back to Page 2. Page 2's
+  fourth entry is Gemini, page 3's is Kiro ("No quota reported").
+- Each reload of the mod starts a read; three in a minute got "could not be
+  read" from Claude, Codex and two more, which cleared on later reads.
+- Not yet checked here: the Overview's second page, pane headers, the light
+  theme.

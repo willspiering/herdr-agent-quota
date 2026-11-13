@@ -62,5 +62,5 @@ test("no provider checks the system or names a program itself", async () => {
     assert.doesNotMatch(source, /"\/(usr|bin|sbin)\//, `${file} names a program path; add it to platform.js`);
     assert.doesNotMatch(source, /io\.home\(\)\s*\}?\//, `${file} builds a home path; use homeFile()`);
   }
-  assert.equal(ADAPTERS.length, 8);
+  assert.equal(ADAPTERS.length, 9);
 });

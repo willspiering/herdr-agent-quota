@@ -130,5 +130,6 @@ export async function read(io) {
   }
   // A sign-in that is present but unreadable is not a sign-out.
   if (results.some(s => s === "invalid" || s === "error")) throw new ReadFailure("credential");
-  return lane(id, label, now, { status: "auth_required" });
+  // A refused key asks to sign in again; no key at all is "signed_out", left out of the dashboard.
+  return lane(id, label, now, { status: results.includes("available") ? "auth_required" : "signed_out" });
 }

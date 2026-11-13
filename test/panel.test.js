@@ -194,3 +194,45 @@ test("panel: setup binds a free toggle key for the quota layout only, never over
   assert.equal(bindToggle({ global: { "cmd-shift-u": "tab.new" } }, "darwin"), null);
   assert.equal(bindToggle({ "layout:agent-quota": { "cmd-shift-u": "space.next" } }, "darwin"), null);
 });
+
+// ── page commands ──
+
+// Ten accounts: three pages of four on Overview and Settings.
+const many = parseReport(JSON.stringify({ schemaVersion: 5, generatedAt: new Date().toISOString(), providers: Array.from({ length: 10 }, (_, i) =>
+  ({ provider: "codex", accountKey: `a${i}`, state: { status: "fresh" }, windows: [{ id: "week", label: "Weekly", kind: "weekly", percentUsed: 10 + i }] })) }));
+const pageOf = host => /Page (\d) of 3/.exec(flatten(host.tree()))?.[1];
+
+test("page commands: the strip passes the press on, and opens nothing", async () => {
+  const presses = ["next-page", "prev-page"];
+  const host = await createHost({ mode: "strip", data: many, layoutTree: tabRow(panelNode(false)), nextCommand: async () => presses.shift() });
+  await host.tasks[1](host.cx);
+  assert.equal(host.state[`${PREFIX}.turn`].delta, -1, "the last press wins");
+  assert.ok(!host.commands.some(c => c[0].startsWith("layout.")));
+  assert.equal(host.overlays.length, 0);
+});
+
+test("page commands turn the shown page's provider list, wrapping at both ends", async () => {
+  const host = await createHost({ mode: "panel", data: many });
+  const press = delta => { host.state[`${PREFIX}.turn`] = { delta, at: Date.now() + Math.random() + (press.n = (press.n ?? 0) + 1) }; return pageOf(host); };
+  assert.equal(pageOf(host), "1");
+  assert.equal(press(1), "2");
+  assert.equal(pageOf(host), "2", "a press is applied once, not on every draw");
+  assert.equal(press(1), "3");
+  assert.equal(press(1), "1", "past the last page: the first");
+  assert.equal(press(-1), "3", "before the first page: the last");
+  // On Settings the same press turns Settings' list; Overview keeps its page.
+  host.view.page = "configure";
+  assert.equal(pageOf(host), "1");
+  assert.equal(press(1), "2");
+  host.view.page = "overview";
+  assert.equal(pageOf(host), "3");
+});
+
+test("page commands: a press from before the copy started, or over 2 s old, is not replayed", async () => {
+  const host = await createHost({ mode: "panel", sharedState: { [`${PREFIX}.data`]: many, [`${PREFIX}.turn`]: { delta: 1, at: Date.now() - 100 } } });
+  assert.equal(pageOf(host), "1");
+  // A copy that started first (a panel kept while hidden) skips a press it was too late to show.
+  const late = await createHost({ mode: "panel", data: many });
+  late.state[`${PREFIX}.turn`] = { delta: 1, at: Date.now() - 5000 };
+  assert.equal(pageOf(late), "1");
+});

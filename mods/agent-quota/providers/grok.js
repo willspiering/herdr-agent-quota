@@ -314,5 +314,7 @@ export async function read(io) {
   // An expired sign-in its own tool can renew: earlier readings stay, stale, until it does.
   if (cli.some(c => c.expired && c.refreshable) || (pi.status === "expired" && pi.refreshable)) throw new ReadFailure("expired");
   if (pi.status === "error") throw new ReadFailure("credentials");
-  return lane(id, label, now, { status: "auth_required" });
+  // A refused sign-in asks to sign in again; none at all is "signed_out", left out of the dashboard.
+  const found = cli.length > 0 || pi.status === "oauth" || pi.status === "expired";
+  return lane(id, label, now, { status: found ? "auth_required" : "signed_out" });
 }
