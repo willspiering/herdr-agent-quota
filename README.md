@@ -41,15 +41,21 @@ Copilot CLI itself reads, and is never stored, logged or shown. That request's
 answer includes your GitHub login; the mod discards it and keeps only the
 quota and plan name. GitHub sees the same request Copilot already makes.
 
+Agents installed here without a provider above (Gemini, Kiro, Crush, Amp, Pi,
+OpenCode and others Herdr knows) are listed in Settings as "No quota
+reported", so you can still choose where they show.
+
 macOS is tested natively. Linux has been run natively on Omarchy (Claude,
-Codex, Cursor, Grok Bot and Copilot through `gh`; see VALIDATION.md). Windows follows the same code
-paths but hasn't been run natively yet; please open an issue with what you see.
+Codex, Cursor, Grok Bot and Copilot through `gh`; see VALIDATION.md). Windows
+follows the same code paths but hasn't been run natively yet; please open an
+issue with what you see.
 
 A few sign-ins need a system program: `security` for macOS Keychain items,
 `sqlite3` for Cursor's and OpenCode's databases, `ps`/`lsof` to find a
-running Antigravity, and `gh` for a GitHub CLI keyring login. Sign-ins are read from their default locations:
-environment-variable overrides (such as `CODEX_HOME`) aren't visible to Herdr
-mods, and only each provider's default profile is read.
+running Antigravity, and `gh` for a GitHub CLI keyring login. Sign-ins are
+read from their default locations: environment-variable overrides (such as
+`CODEX_HOME`) aren't visible to Herdr mods, and only each provider's default
+profile is read.
 
 Quota is per account and comes from this computer's sign-ins. Agents running
 on other machines connected to Herdr aren't listed and their pane headers have
@@ -107,7 +113,7 @@ Start with `herdr-app status`: it lists any mod or layout errors.
 | What you see | What to do |
 | --- | --- |
 | A provider is missing | It was never signed in on this computer, so the dashboard leaves it out. Turn on Settings → "Providers without quota" to list it anyway, and check the table above for your system. |
-| "Sign-in needed" | Its saved sign-in was refused. Sign in again with that agent's own app or CLI on this computer, then press Refresh. |
+| "Sign in to … again" / "Sign-in needed" | Its saved sign-in was refused. Sign in again with that agent's own app or CLI on this computer, then press Refresh. |
 | "needs one Keychain approval" | Press Refresh in the dashboard and allow the prompt (macOS). |
 | "reads its GitHub CLI sign-in from the keyring once you press Refresh" | Press Refresh once; the mod then asks `gh` for Copilot's token. |
 | GitHub Copilot "Not signed in" with `gh` signed in | Check `gh auth status`, and that `gh` is in `/usr/bin`, `/usr/local/bin`, Homebrew, Nix, `~/.local/bin` or mise's shims. |
