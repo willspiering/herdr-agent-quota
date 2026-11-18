@@ -74,7 +74,7 @@ test("claude falls back to the credentials file off macOS and never refreshes an
   await assert.rejects(claude.read(refused), e => e instanceof ReadFailure && e.message === "expired"); // earlier readings stay
   assert.deepEqual(refused.requests.map(r => r.url), [CLAUDE_USAGE]); // no refresh endpoint
   const missing = fakeIo({ platform: "linux" });
-  assert.equal((await claude.read(missing)).state.status, "auth_required");
+  assert.equal((await claude.read(missing)).state.status, "signed_out");
 });
 test("claude: a rejected token is signed out; outages and odd answers keep earlier readings", async () => {
   assert.equal((await claude.read(fakeIo({ keychain: claudeSecret(), routes: { [CLAUDE_USAGE]: [401, {}] } }))).state.status, "auth_required");
@@ -125,7 +125,7 @@ test("codex tries the older endpoint, and is signed out only when both refuse th
   assert.equal((await codex.read(fakeIo({ files, routes: { [CODEX_USAGE]: [401, {}], [CODEX_OLD]: [403, {}] } }))).state.status, "auth_required");
   await assert.rejects(codex.read(fakeIo({ files, routes: { [CODEX_USAGE]: [401, {}], [CODEX_OLD]: [500, {}] } })), ReadFailure);
   await assert.rejects(codex.read(fakeIo({ files, routes: { [CODEX_USAGE]: [429, {}], [CODEX_OLD]: [200, codexBody] } })), ReadFailure);
-  assert.equal((await codex.read(fakeIo())).state.status, "auth_required");
+  assert.equal((await codex.read(fakeIo())).state.status, "signed_out");
 });
 
 // Differential: the same vendor answer through quota-axi's normalizer and the native port.

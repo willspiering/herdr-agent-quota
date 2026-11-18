@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- Grok Bot is its own provider: its weekly included usage, read from Cursor's
+  `GetSandUsageStatus` with the Cursor sign-in (as Omarchy's agents panel
+  does). It used to be an unnamed "Week" row under Cursor, which no longer
+  asks for it. A week with nothing used reads 0%, not "no reading". Saved
+  choices for the old Cursor `grok_bot` limit don't carry over.
+- A provider never signed in on this computer (`signed_out`) stays out of the
+  dashboard, as with no agent installed; Settings → "Providers without quota"
+  still lists it. A sign-in the vendor refused (`auth_required`) still shows,
+  now as "Sign in to … again".
+- GitHub Copilot reads a GitHub CLI login kept in the system keyring, through
+  `gh auth token --hostname github.com`. `gh` runs only when `hosts.yml` shows
+  a github.com login without a token, only from known absolute paths (system,
+  Homebrew, Nix, `~/.local/bin`, mise's shims), with prompts, update checks
+  and mise auto-installs off, and only once a Refresh has approved it (as with
+  a Keychain item). The answer must look like a GitHub token; it goes only to
+  `api.github.com` and is never kept. Until then the dashboard says to press
+  Refresh, without backing off.
+- `agent-quota.next-page` and `agent-quota.prev-page` turn the open
+  dashboard's provider pages (Overview or Settings), wrapping at the ends.
+  Bind them in `keys.json`.
+- Linux: run natively on Omarchy (Herdr 0.1.15). Claude, Codex, Cursor (editor
+  database through sqlite3), Grok Bot and Copilot (through `gh`) read real
+  quota.
+
 - Internal: main.js is split by job. state.js (shared state), reads.js (the
   read schedule) and ui/ (parts, instruments, strip, dashboard, settings,
   header); main.js keeps only the view's lifecycle. The test host and preview

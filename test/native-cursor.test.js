@@ -68,19 +68,20 @@ test("cursor reads the editor's state.vscdb read-only and reports quota-axi's li
   assert.equal(cmd, "/usr/bin/sqlite3");
   assert.deepEqual(args.slice(0, 5), ["-readonly", "-init", "/dev/null", "-ascii", DB]); // never the user's ~/.sqliterc
   assert.ok(!args[5].includes("cachedEmail"), "the cached email is never read");
-  assert.deepEqual(io.requests.map(r => [r.url, r.method, r.body]), [[USAGE, "POST", "{}"], [PLAN, "POST", "{}"], [SAND, "POST", "{}"]]);
+  // Grok Bot's allowance is its own provider (grokbot.js): the Cursor lane never asks for it.
+  assert.deepEqual(io.requests.map(r => [r.url, r.method, r.body]), [[USAGE, "POST", "{}"], [PLAN, "POST", "{}"]]);
   for (const r of io.requests) { assert.equal(r.headers.authorization, `Bearer ${TOKEN}`); assert.equal(r.headers["connect-protocol-version"], "1"); }
   assert.equal(lane.provider, "cursor"); assert.equal(lane.label, "Cursor");
   assert.equal(lane.state.status, "fresh"); assert.equal(lane.plan, "Pro"); assert.deepEqual(lane.accountKeys, ["default"]);
   assert.deepEqual(lane.windows.map(w => [w.id, w.kind, w.percentUsed, w.windowSeconds]), [["included_usage", "monthly", 42, null],
-    ["auto_usage", "monthly", 12, null], ["api_usage", "monthly", 77, null], ["spend_limit", "credits", 25, null], ["grok_bot", "weekly", 33, null]]);
+    ["auto_usage", "monthly", 12, null], ["api_usage", "monthly", 77, null], ["spend_limit", "credits", 25, null]]);
   assert.equal(lane.windows[0].resetsAt, iso(cycleEnd));
   // Monthly pools pace over the billing cycle: 12 of 30 days left with 58% left is behind pace.
   assert.equal(lane.windows[0].pace.status, "behind"); assert.equal(lane.windows[0].pace.timeRemainingPercent, 40);
   assert.equal(lane.windows[3].pace.status, "unknown");
   // The lane passes the mod's own schema check.
   const report = normalizeReport({ schemaVersion: 5, generatedAt: iso(now), providers: [lane] }, now);
-  assert.equal(report.providers[0].windows.length, 5);
+  assert.equal(report.providers[0].windows.length, 4);
   assert.equal(io.keychain, undefined);
   noSecrets(lane);
 });
@@ -109,17 +110,17 @@ test("cursor reads the CLI auth.json on Linux and the editor database at its XDG
   const cli = fakeIo({ platform: "linux", sqlite: new Error("ENOENT"), files: { [LINUX_AUTH]: JSON.stringify({ accessToken: ` ${CLI_TOKEN} `, refreshToken: "REFRESH-SECRET" }) }, routes: ok });
   const lane = await cursor.read(cli);
   assert.equal(cli.requests[0].headers.authorization, `Bearer ${CLI_TOKEN}`);
-  assert.equal(lane.windows.length, 5);
+  assert.equal(lane.windows.length, 4);
   const editor = fakeIo({ platform: "linux", sqlite: { code: 0, stdout: editorRows(), stderr: "" }, routes: ok });
   await cursor.read(editor);
   assert.equal(editor.execs[0][5], LINUX_DB);
 });
 
-test("cursor without any sign-in is signed out, with no Keychain read and no request", async () => {
+test("cursor without any sign-in is signed_out, with no Keychain read and no request", async () => {
   for (const io of [fakeIo(), fakeIo({ allowed: false }), fakeIo({ platform: "linux" }), fakeIo({ platform: "windows" }),
     fakeIo({ sqlite: { code: 0, stdout: "", stderr: "" } }), fakeIo({ sqlite: new Error("ENOENT") })]) {
     const lane = await cursor.read(io);
-    assert.equal(lane.state.status, "auth_required"); assert.deepEqual(lane.windows, []);
+    assert.equal(lane.state.status, "signed_out"); assert.deepEqual(lane.windows, []);
     assert.equal(io.requests.length, 0);
     assert.ok(io.execs.every(e => e[0] !== "/usr/bin/security"), "no CLI config, no Keychain lookup");
   }
@@ -138,9 +139,9 @@ test("cursor never reads the Keychain secret without approval", async () => {
   await assert.rejects(cursor.read(present), e => e instanceof ReadFailure && e.message === "keychain");
   assert.ok(present.execs.every(e => !e.includes("-w")));
   assert.equal(present.requests.length, 0);
-  // Item absent: signed out.
+  // Item absent: no sign-in at all.
   const absent = fakeIo({ files: { [CLI_CONFIG]: cliConfig }, allowed: false });
-  assert.equal((await cursor.read(absent)).state.status, "auth_required");
+  assert.equal((await cursor.read(absent)).state.status, "signed_out");
   // Approval allowed but the Keychain refuses: earlier readings stay.
   const denied = fakeIo({ files: { [CLI_CONFIG]: cliConfig }, keychain: { code: 51, stdout: "", stderr: "denied" }, allowed: true });
   await assert.rejects(cursor.read(denied), e => e instanceof ReadFailure && e.message === "keychain");
@@ -156,7 +157,7 @@ test("cursor: outages, odd answers and unreadable stores keep earlier readings",
   const moved = fakeIo({ sqlite, routes: ok });
   const real = moved.fetch; moved.fetch = (u, o) => real(u, o).then(r => ({ ...r, url: "https://evil.example/usage" }));
   await assert.rejects(cursor.read(moved), e => e instanceof ReadFailure && e.message === "redirected");
-  // The plan and Grok Bot calls are optional, as in quota-axi.
+  // The plan call is optional, as in quota-axi.
   const partial = await cursor.read(fakeIo({ sqlite, routes: { [USAGE]: [200, usageBody], [PLAN]: [500, {}], [SAND]: [429, {}] } }));
   assert.deepEqual(partial.windows.map(w => w.id), ["included_usage", "auto_usage", "api_usage", "spend_limit"]);
   assert.equal(partial.plan, "pro"); // the editor's stored membership

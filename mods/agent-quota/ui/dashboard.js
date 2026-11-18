@@ -72,7 +72,7 @@ function provider(view, p) {
   const activity = blocked ? [`▲ ${blocked} needs you`, t.blocked] : working ? [`● ${working} working`, t.working] : p.sessions.length ? [`○ ${p.sessions.length} open`, t.muted] : ["not running", t.dim ?? t.muted];
   const status = p.windows.length && (p.stale || p.status !== "fresh") ? "Stale reading · refresh to verify" : p.reused ? "Recent cached reading" : null;
   const empty = !p.windows.length
-    ? [p.status === "auth_required" ? `Sign in to ${p.label} to read its quota.` : `${p.label} reported no quota.`, null]
+    ? [p.status === "auth_required" ? `Sign in to ${p.label} again to read its quota.` : p.status === "signed_out" ? `Sign in to ${p.label} to read its quota.` : `${p.label} reported no quota.`, null]
     : !ws.length ? ["All limits are hidden.", "Choose limits"] : null;
   let body;
   if (ws.length && o.dash === "gauges") {

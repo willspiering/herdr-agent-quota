@@ -7,6 +7,7 @@
 //   options     the person's Settings
 //   discovered  the agents installed here (Herdr's knownAgents)
 //   view        a request to show a provider or page in the docked dashboard
+//   turn        the last next-page/prev-page press ({ delta, at }), for every dashboard copy
 import { shared, setShared, layout } from "herdr";
 import { PREFIX } from "./core.js";
 

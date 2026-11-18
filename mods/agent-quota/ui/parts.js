@@ -96,7 +96,9 @@ export const PAGE = { providers: 4, limits: 8, sessions: 8 };
 // One page of `items`; the copy remembers each list's page in `view.pages`.
 export function pageItems(view, id, items, size) {
   const total = Math.max(1, Math.ceil(items.length / size));
-  const page = Math.min(view.pages[id] ?? 0, total - 1);
+  let page = Math.min(view.pages[id] ?? 0, total - 1);
+  // A page command (agent-quota.next-page / prev-page, main.js turnPage) for this list: wraps.
+  if (view.turn?.list === id) { page = (page + view.turn.delta + total) % total; view.pages[id] = page; view.turn = null; }
   return { items: items.slice(page * size, (page + 1) * size), page, total };
 }
 // An array to pass to .children(): Herdr's .child() rejects null, so one page adds nothing.

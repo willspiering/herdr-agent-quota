@@ -406,12 +406,13 @@ async function request(io, url, token) {
 
 export async function read(io) {
   const now = io.now, failures = [];
-  let empty = false;
+  let empty = false, found = false;
   // A store that can't answer hands over to the next. A request that fails for any reason but a
   // rejected token is about the request, not the credential, so it is reported as is.
   for (const source of [piCredential, cliCredential]) {
     const sign = await source(io, now);
     if (!sign.token) { failures.push(sign.failure); continue; }
+    found = true;
     let parsed;
     try {
       const answer = await request(io, sign.url, sign.token);
@@ -429,5 +430,6 @@ export async function read(io) {
   if (empty) return lane(id, label, now);
   const failure = failures.find(f => f.kind === "transient") ?? failures.find(f => f.kind === "expired");
   if (failure) throw new ReadFailure(failure.kind === "expired" ? "expired" : failure.reason);
-  return lane(id, label, now, { status: "auth_required" });
+  // A refused token asks to sign in again; no token at all is "signed_out", left out of the dashboard.
+  return lane(id, label, now, { status: found ? "auth_required" : "signed_out" });
 }

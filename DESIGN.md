@@ -109,7 +109,8 @@ padding with a `glyph name [plan] ───── activity` heading.
 
 To bound eager GPUI descriptions, Overview and Settings show four provider/account
 sections per page. Each account shows eight limits (or setting chips) and eight
-agent sessions per page, with native Previous/Next controls. Redline summary text
+agent sessions per page, with native Previous/Next controls; the next-page and
+prev-page commands turn the provider pages from the keyboard. Redline summary text
 shows three entries and counts the remainder. No underlying reading is truncated.
 
 Meter rows: label 72, meter `width − 430` (min 60, max 520), value 76,

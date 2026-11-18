@@ -85,14 +85,15 @@ test("grok reads the CLI sign-in, posts one empty gRPC-web-text call and names w
 });
 
 test("grok: missing or unusable sign-ins are signed out; API keys are never sent to grok.com", async () => {
+  // Nothing usable stored is "signed_out" (left out of the dashboard), not a refused sign-in.
   const missing = fakeIo();
-  assert.equal((await grok.read(missing)).state.status, "auth_required");
+  assert.equal((await grok.read(missing)).state.status, "signed_out");
   assert.equal(missing.requests.length, 0);
   const junk = fakeIo({ files: { [GROK_AUTH]: "{not json", [PI_AUTH]: JSON.stringify({ other: {} }) } });
-  assert.equal((await grok.read(junk)).state.status, "auth_required");
+  assert.equal((await grok.read(junk)).state.status, "signed_out");
   const apiKeyOnly = fakeIo({ files: { [GROK_AUTH]: JSON.stringify({ "https://api.x.ai": { key: TOKEN } }) } });
   const lane = await grok.read(apiKeyOnly);
-  assert.equal(lane.state.status, "auth_required"); assert.equal(lane.windows.length, 0); assert.equal(apiKeyOnly.requests.length, 0);
+  assert.equal(lane.state.status, "signed_out"); assert.equal(lane.windows.length, 0); assert.equal(apiKeyOnly.requests.length, 0);
 });
 
 test("grok: a refused sign-in is signed out, unless the model catalog says it still works", async () => {
@@ -136,7 +137,7 @@ test("grok tries valid sign-ins before expired ones, then Pi's xAI sign-in", asy
   const old = JSON.stringify({ xai: { type: "oauth", access: PI_TOKEN, refresh: "REFRESH-SECRET", expires: now - 1 } });
   await assert.rejects(grok.read(fakeIo({ files: { [PI_AUTH]: old }, routes: { [QUOTA]: [401, ""], [XAI_MODELS]: [401, ""] } })), failsWith("expired"));
   // Pi references are never resolved.
-  assert.equal((await grok.read(fakeIo({ files: { [PI_AUTH]: JSON.stringify({ xai: { type: "api_key", key: "$XAI_API_KEY" } }) } }))).state.status, "auth_required");
+  assert.equal((await grok.read(fakeIo({ files: { [PI_AUTH]: JSON.stringify({ xai: { type: "api_key", key: "$XAI_API_KEY" } }) } }))).state.status, "signed_out");
 });
 
 test("grok: outages, rate limits and odd answers keep earlier readings", async () => {

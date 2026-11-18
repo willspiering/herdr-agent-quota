@@ -96,7 +96,8 @@ export function usageWindows(raw, now) {
 export async function read(io) {
   const now = io.now, signedOut = plan => lane(id, label, now, { status: "auth_required", plan });
   const sign = await signIn(io);
-  if (!sign) return signedOut(null);
+  // No sign-in anywhere on this computer: nothing to renew, so the dashboard leaves it out.
+  if (!sign) return lane(id, label, now, { status: "signed_out" });
   const answer = await getJson(io, USAGE, { ...HEADERS, authorization: `Bearer ${sign.token}` });
   // A stored expiry is advisory, so the endpoint decides. A token that expired and was refused is
   // never refreshed here (Claude Code renews it on its next start): earlier readings stay, stale.

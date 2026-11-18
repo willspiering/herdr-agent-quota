@@ -93,7 +93,7 @@ async function cliSignIn(io) {
 }
 
 // POST a Connect RPC. A refused credential is an answer ({ auth: true }), not a failure.
-async function rpc(io, method, token) {
+export async function rpc(io, method, token) {
   const url = `${API}${method}`;
   let response;
   try {
@@ -110,7 +110,7 @@ async function rpc(io, method, token) {
 }
 
 // Epoch milliseconds, epoch seconds or an ISO string, as quota-axi's parseEpochMillisOrIso.
-function time(value) {
+export function time(value) {
   const n = num(value);
   if (n !== undefined) { const d = new Date(n > 10000000000 ? n : n * 1000); return Number.isFinite(d.getTime()) ? d.toISOString() : undefined; }
   if (typeof value !== "string" || !value.trim()) return undefined;
@@ -129,7 +129,7 @@ function monthBefore(iso) {
 
 // Cursor windows carry no fixed length (windowSeconds stays unknown, as in quota-axi); pace is
 // measured over the billing cycle from its start to its reset, as quota-axi's starts_at basis.
-function cycleWindow(now, w, startsAt) {
+export function cycleWindow(now, w, startsAt) {
   const out = limit(now, w), start = Date.parse(startsAt ?? ""), reset = Date.parse(out.resetsAt ?? "");
   if (out.percentUsed === null || !Number.isFinite(start) || !Number.isFinite(reset) || reset <= now || start >= reset || start > now) return out;
   const remaining = 100 * (reset - now) / (reset - start), reserve = (100 - out.percentUsed) - remaining;
@@ -169,33 +169,45 @@ export function planName(planInfo, membership) {
   return plain(str(info?.planName) ?? str(info?.price) ?? membership) ?? null;
 }
 
+// Grok Bot's allowance (GetSandUsageStatus) is its own provider now (grokbot.js), so the Cursor
+// lane asks only for the plan. usageWindows still takes it, to stay comparable with quota-axi.
 async function usage(io, sign, now) {
-  const [current, plan, sand] = await Promise.allSettled(["GetCurrentPeriodUsage", "GetPlanInfo", "GetSandUsageStatus"].map(m => rpc(io, m, sign.token)));
+  const [current, plan] = await Promise.allSettled(["GetCurrentPeriodUsage", "GetPlanInfo"].map(m => rpc(io, m, sign.token)));
   if (current.status === "rejected") throw current.reason;
   if (current.value.auth) return null;
   const body = r => r.status === "fulfilled" && !r.value.auth ? r.value.body : undefined;
-  const windows = usageWindows(current.value.body, body(plan), body(sand), now);
+  const windows = usageWindows(current.value.body, body(plan), undefined, now);
   if (!windows.length) throw new ReadFailure("malformed");
   return lane(id, label, now, { plan: planName(body(plan), sign.membership), windows });
 }
 
-// The editor store comes first (it never prompts); the CLI store is read when the editor's is
-// absent, unreadable, or its token was refused. Only the endpoint decides whether a token works.
-export async function read(io) {
-  const now = io.now, signedOut = () => lane(id, label, now, { status: "auth_required" });
+/**
+ * Asks Cursor with each Cursor sign-in in turn, for any provider that runs on a Cursor account.
+ * The editor store comes first (it never prompts); the CLI store is read when the editor's is
+ * absent, unreadable, or its token was refused. Only the endpoint decides whether a token works.
+ * `ask(sign)` resolves a lane, or null when Cursor refused the token.
+ * @param {any} io @param {string} provider @param {string} name @param {(sign: any) => Promise<any>} ask  sign: { token, membership? }
+ */
+export async function withSignIn(io, provider, name, ask) {
+  const out = status => lane(provider, name, io.now, { status });
   const editor = await editorSignIn(io);
   if (editor.token) {
-    const answer = await usage(io, editor, now);
+    const answer = await ask(editor);
     if (answer) return answer;
     // Only where the CLI has a store this mod can read.
-    if (!homeFile(io, CLI_AUTH) && !canRun(io, "security")) return signedOut();
+    if (!homeFile(io, CLI_AUTH) && !canRun(io, "security")) return out("auth_required");
     const cli = await cliSignIn(io);
     if (cli.unreadable) throw new ReadFailure("unreadable");
-    return cli.token ? (await usage(io, cli, now)) ?? signedOut() : signedOut();
+    return cli.token ? (await ask(cli)) ?? out("auth_required") : out("auth_required");
   }
   const cli = await cliSignIn(io);
-  if (cli.token) return (await usage(io, cli, now)) ?? signedOut();
+  if (cli.token) return (await ask(cli)) ?? out("auth_required");
   // A store that holds a sign-in it couldn't give up is not a sign-out: earlier readings stay.
   if (editor.unreadable || cli.unreadable) throw new ReadFailure("unreadable");
-  return signedOut();
+  // No sign-in anywhere on this computer: not one to renew, so the dashboard leaves it out.
+  return out("signed_out");
+}
+
+export async function read(io) {
+  return withSignIn(io, id, label, sign => usage(io, sign, io.now));
 }

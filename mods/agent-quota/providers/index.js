@@ -17,8 +17,9 @@ import * as opencodeGo from "./opencode-go.js";
 import * as kimi from "./kimi.js";
 import * as agy from "./agy.js";
 import * as grok from "./grok.js";
+import * as grokbot from "./grokbot.js";
 
-export const ADAPTERS = [claude, codex, copilot, cursor, opencodeGo, kimi, agy, grok];
+export const ADAPTERS = [claude, codex, copilot, cursor, opencodeGo, kimi, agy, grok, grokbot];
 
 // Herdr agent key or name (lowercase) → provider id.
 export const ALIASES = Object.fromEntries(ADAPTERS.flatMap(a => a.agents.map(name => [name, a.id])));

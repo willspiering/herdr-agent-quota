@@ -11,6 +11,8 @@ const ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 // without consumer credits, an app that exposes no endpoint). Earlier readings stay and age to
 // stale; nothing backs off and no error is shown.
 const QUIET = new Set(["not-running", "no-quota", "no-endpoint"]);
+// Waiting for the user's approval (a Keychain item, a keyring read through gh): never backs off.
+const CONSENT = new Set(["keychain", "keyring"]);
 // What failed providers' reasons tell the user to do. Our own words only. A specific hint only
 // when every failed provider shares it, so one provider's reason is never pinned on another.
 function failureMessage(failures) {
@@ -20,6 +22,7 @@ function failureMessage(failures) {
   const one = reasons.size === 1 ? [...reasons][0] : null;
   if (one === "expired") return `${who}: sign-in expired. Open it once to renew; earlier readings were kept.`;
   if (one === "keychain") return `${who}: needs one Keychain approval. Press Refresh in the quota dashboard and allow it.`;
+  if (one === "keyring") return `${who}: reads its GitHub CLI sign-in from the keyring once you press Refresh in the quota dashboard.`;
   return `${who}: quota could not be read. Earlier readings were kept; retries back off.`;
 }
 
@@ -56,5 +59,5 @@ export async function collect(io, now = Date.now(), providers = null, deadline =
   // Waiting for a Keychain approval is the user's to give, not a reason to back everything off.
   const complete = ids === null && !bad.length && !quiet.length;
   return { report, swept: complete, read: complete ? null : good.map(r => r.id), cleared: complete ? null : [...good, ...quiet].map(r => r.id),
-    failed: bad.length ? { message, ids: bad.map(r => r.id), backoff: bad.some(r => r.error?.message !== "keychain") } : null };
+    failed: bad.length ? { message, ids: bad.map(r => r.id), backoff: bad.some(r => !CONSENT.has(r.error?.message)) } : null };
 }
